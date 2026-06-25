@@ -24,16 +24,17 @@
 | **6.1** | 会話フェーズ追跡（GREETING→TOURING→NEGOTIATING→CLOSING）+ `session.update` で動的 instructions 切替 | feat/phase6-strategy |
 | **7.1** | バックグラウンドシーン監視（25s 間隔で Vision スキャン・部長の動き検出） | feat/phase6-strategy |
 | **7.2** | 対話者位置追従ナビゲーション（Vision 結果から奥エリア移動を検出して先回り誘導） | feat/phase6-strategy |
+| **6.2** | `AudioBackend` 抽象化 + `WebRTCAudioBackend`（aiortc + aiohttp）、`--webrtc` フラグで切替 | feat/phase6.2-webrtc |
 
 ---
 
 ## 🔲 残課題・未実装
 
-### 中優先度（仕様待ち）
+### 中優先度
 
-- **Phase 6.2: WebRTC 音声バックエンド対応**
-  - 運営提供の仕様が確定後に対応
-  - `stream_mic()` / `play_audio()` をインターフェースで抽象化
+- **Phase 6.2 本実装: 運営 WebRTC 仕様への対応**
+  - 現在は aiortc + aiohttp による仮実装（`--webrtc` フラグで起動）
+  - `WebRTCAudioBackend` のみ差し替えれば OK な構造にしてあるため、仕様確定後に対応
 
 ### 低優先度
 
