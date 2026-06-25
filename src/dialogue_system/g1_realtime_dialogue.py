@@ -293,6 +293,24 @@ def _dir_to_sonic(dx: int, dy: int) -> float:
     return math.atan2(dy, dx)
 
 
+def _pointing_motion(robot_xi: int, robot_yi: int, facing_rad: float,
+                     target_xi: int, target_yi: int) -> str:
+    """ロボットの現在位置・向きと対象物の位置から適切な指さしモーション名を返す。"""
+    dx = (target_xi - robot_xi) * GRID_STEP_M
+    dy = (target_yi - robot_yi) * GRID_STEP_M
+    if abs(dx) < 0.01 and abs(dy) < 0.01:
+        return "point_forward"
+    target_rad = math.atan2(dy, dx)
+    rel_deg = math.degrees(_norm_angle(target_rad - facing_rad))
+    if abs(rel_deg) < 45:
+        return "point_forward"
+    elif 45 <= rel_deg < 135:
+        return "this_way_left"
+    elif -135 < rel_deg <= -45:
+        return "this_way_right"
+    else:
+        return "point_back_over_shoulder"
+
 
 def _normalize_device_selector(value):
     if value is None:
@@ -767,6 +785,75 @@ class GridNavigator:
         return True
 
 
+# ── カメラキャプチャ（Phase 3.1） ─────────────────────────────
+
+class CameraCapture:
+    """ZMQ カメラストリームから最新フレームをバックグラウンドでキャプチャ。"""
+
+    def __init__(self, zmq_url: str = "tcp://localhost:5555",
+                 camera: str = "ego_view"):
+        self._url    = zmq_url
+        self._camera = camera
+        self._latest_jpg: Optional[bytes] = None
+        self._lock   = threading.Lock()
+        self._stop   = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._connected = False
+
+    def start(self):
+        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def get_latest_b64(self) -> Optional[str]:
+        """最新フレームを base64 JPEG 文字列で返す。未受信は None。"""
+        with self._lock:
+            if self._latest_jpg:
+                return base64.b64encode(self._latest_jpg).decode()
+            return None
+
+    def _recv_loop(self):
+        try:
+            import msgpack
+        except ImportError:
+            print("[Camera] msgpack が見つかりません — pip install msgpack")
+            return
+
+        ctx = zmq.Context()
+        sock = ctx.socket(zmq.SUB)
+        sock.setsockopt(zmq.SUBSCRIBE, b"")
+        sock.setsockopt(zmq.CONFLATE, 1)   # 最新フレームのみ保持
+        sock.setsockopt(zmq.RCVTIMEO, 500)
+        sock.connect(self._url)
+        print(f"[Camera] ZMQ 接続: {self._url}  カメラ: {self._camera}")
+
+        try:
+            while not self._stop.is_set():
+                try:
+                    raw = sock.recv()
+                except zmq.Again:
+                    continue
+                try:
+                    payload = msgpack.unpackb(raw, raw=False)
+                    images  = payload.get("images", {}) if isinstance(payload, dict) else {}
+                    encoded = (images.get(self._camera)
+                               or (next(iter(images.values())) if images else None))
+                    if encoded:
+                        jpg = base64.b64decode(encoded)
+                        with self._lock:
+                            self._latest_jpg = jpg
+                        if not self._connected:
+                            self._connected = True
+                            print("[Camera] 映像受信開始")
+                except Exception:
+                    pass
+        finally:
+            sock.close(0)
+            ctx.term()
+
+
 # ── キーボード手動制御 ────────────────────────────────────────
 
 class KeyboardController:
@@ -831,6 +918,7 @@ class RealtimeDialogue:
         player: MotionPlayer,
         walker,
         navigator: Optional["GridNavigator"] = None,
+        camera: Optional["CameraCapture"] = None,
         vad: bool = True,
         mic_device=None,
         out_device=None,
@@ -839,12 +927,112 @@ class RealtimeDialogue:
         self.player    = player
         self.walker    = walker
         self.navigator = navigator
+        self.camera    = camera
         self.vad       = vad
         self.mic_device = _normalize_device_selector(mic_device)
         self.out_device = _normalize_device_selector(out_device)
         self._ws      = None
         self._abuf    = bytearray()
-        self._nav_lock = threading.Lock()   # navigate_to の排他制御
+        self._nav_lock         = threading.Lock()
+        self._backchannel_timer: Optional[threading.Timer] = None
+
+    # ── Phase 3.2: バックチャネル相づち ──────────────────────────
+
+    def _schedule_backchannel(self, delay: float = 1.5):
+        """発話中の相づち（nod）を delay 秒後に再生する。"""
+        self._cancel_backchannel()
+        player = self.player
+        walker = self.walker
+        motions = self.motions
+
+        def _do_nod():
+            if "nod" not in motions:
+                return
+            walker.switch_to_streaming()
+            player.play_once(motions["nod"], force=False)
+            def _restore():
+                while player.is_playing():
+                    time.sleep(0.05)
+                walker.switch_to_planner()
+            threading.Thread(target=_restore, daemon=True).start()
+
+        self._backchannel_timer = threading.Timer(delay, _do_nod)
+        self._backchannel_timer.daemon = True
+        self._backchannel_timer.start()
+
+    def _cancel_backchannel(self):
+        if self._backchannel_timer is not None:
+            self._backchannel_timer.cancel()
+            self._backchannel_timer = None
+
+    # ── Phase 3.1: カメラ映像解析 ─────────────────────────────
+
+    async def _analyze_scene(self) -> str:
+        """最新カメラ映像を GPT-4o Vision で解析してシーン説明を返す。"""
+        if self.camera is None:
+            return "カメラ未接続"
+        b64 = self.camera.get_latest_b64()
+        if b64 is None:
+            return "映像未受信（シミュレーターが起動しているか確認してください）"
+
+        payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "これはロボット店長の一人称視点カメラ映像です。"
+                                "以下を簡潔な日本語で答えてください（全体2〜4文）:\n"
+                                "1. 人物（部長）の位置（正面/左/右、近い/遠い）\n"
+                                "2. 人物の向き（こちらを向いているか）\n"
+                                "3. 周囲の障害物や特記事項"
+                            ),
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 200,
+        }
+        import urllib.request
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            loop = asyncio.get_event_loop()
+            def _call():
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read())
+            result = await loop.run_in_executor(None, _call)
+            return result["choices"][0]["message"]["content"]
+        except Exception as e:
+            return f"解析エラー: {e}"
+
+    async def _submit_scene_analysis(self, call_id: str):
+        """look_around の結果（Vision解析）を Realtime API に返す。"""
+        desc = await self._analyze_scene()
+        print(f"\n[Vision] {desc}")
+        await self._send({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": desc,
+            },
+        })
+        await self._send({"type": "response.create"})
 
     async def connect(self):
         try:
@@ -935,6 +1123,41 @@ class RealtimeDialogue:
             },
         }
 
+        tool_point_at = {
+            "type": "function",
+            "name": "point_at",
+            "description": (
+                "特定の場所を指差す動作を再生する。「こちらの棚が…」「あちらに…」など"
+                "空間を指示する発話と連動して呼び出す。ロボットの現在位置を考慮して"
+                "適切な方向の指差しモーションを自動選択する。"
+                "select_motion の代わりとして使用し、同時に呼ばない。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "enum": list(_NAMED_LOCATIONS.keys()),
+                        "description": "指差す場所の名前（_NAMED_LOCATIONS のキー）",
+                    }
+                },
+                "required": ["location"],
+            },
+        }
+        tool_look_around = {
+            "type": "function",
+            "name": "look_around",
+            "description": (
+                "ロボットの一人称カメラ映像を解析し、部長の位置・向き・"
+                "周囲の状況を把握する。対話の冒頭や、部長の位置を確認したいときに呼ぶ。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        }
+
         cfg = {
             "modalities": ["text", "audio"],
             "instructions": SYSTEM_PROMPT,
@@ -942,7 +1165,7 @@ class RealtimeDialogue:
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
             "input_audio_transcription": {"model": "whisper-1"},
-            "tools": [tool_motion, tool_walk, tool_navigate],
+            "tools": [tool_motion, tool_walk, tool_navigate, tool_point_at, tool_look_around],
             "tool_choice": "auto",
         }
         if self.vad:
@@ -1118,7 +1341,6 @@ class RealtimeDialogue:
                             print(f"\n[Nav] → {location} ({xi},{yi})"
                                   + (f"  向き={facing}" if facing else ""))
                             def _nav(xi=xi, yi=yi, fd=facing_deg):
-                                # モーション停止 → プランナーモードで移動
                                 self.player.stop()
                                 self.walker.switch_to_planner()
                                 with self._nav_lock:
@@ -1127,21 +1349,56 @@ class RealtimeDialogue:
                     except Exception as e:
                         print(f"\n[Navエラー] {e}")
 
+                elif fname == "point_at":
+                    try:
+                        args     = json.loads(ev.get("arguments", "{}"))
+                        location = args.get("location", "")
+                        cell     = _NAMED_LOCATIONS.get(location)
+                        if cell is None or self.navigator is None:
+                            motion_name = "point_forward"
+                        else:
+                            tx, ty = cell
+                            rx, ry = self.navigator.cell
+                            motion_name = _pointing_motion(
+                                rx, ry, self.walker._facing_angle, tx, ty)
+                        print(f"\n[指さし] → {location}  使用モーション: {motion_name}")
+                        m = self.motions.get(motion_name) or self.motions.get("point_forward")
+                        if m:
+                            def _point(motion=m):
+                                self.walker.switch_to_streaming()
+                                self.player.play_once(motion, force=True)
+                                while self.player.is_playing():
+                                    time.sleep(0.05)
+                                self.walker.switch_to_planner()
+                            threading.Thread(target=_point, daemon=True).start()
+                    except Exception as e:
+                        print(f"\n[指さしエラー] {e}")
+
+                elif fname == "look_around":
+                    print("\n[Vision] シーン解析中...")
+                    # 実際の結果送信は output_item.done で行う
+
             elif t == "response.output_item.done":
                 item = ev.get("item", {})
                 if item.get("type") == "function_call":
-                    asyncio.create_task(
-                        self._submit_function_result(item.get("call_id", "")))
+                    fname    = item.get("name", "")
+                    call_id  = item.get("call_id", "")
+                    if fname == "look_around":
+                        asyncio.create_task(self._submit_scene_analysis(call_id))
+                    else:
+                        asyncio.create_task(self._submit_function_result(call_id))
 
             elif t == "response.audio.done":
                 print()
 
             elif t == "input_audio_buffer.speech_started":
                 print("\n🎤 [話し中...]")
-                self.player.stop()          # モーション中断
+                self._abuf = bytearray()    # ロボット音声を即時停止（full-duplex）
                 self.walker.stop()          # 移動・ナビゲーション中断
+                self._schedule_backchannel()  # 1.5s 後に相づち nod
 
             elif t == "input_audio_buffer.speech_stopped":
+                self._cancel_backchannel()
                 print("✅ [認識中...]")
 
             elif t == "conversation.item.input_audio_transcription.completed":
@@ -1245,7 +1502,11 @@ def main():
                    help="利用可能な音声デバイス一覧を表示して終了")
     p.add_argument("--motion-dir", default=G1_MOTION_DIR,
                    help=f"動作ライブラリルート (デフォルト: {G1_MOTION_DIR})")
-    p.add_argument("--zmq-port",   type=int,   default=ZMQ_PORT)
+    p.add_argument("--zmq-port",    type=int,   default=ZMQ_PORT)
+    p.add_argument("--camera-port", type=int,   default=5555,
+                   help="カメラ映像 ZMQ ポート (デフォルト: 5555)")
+    p.add_argument("--no-camera",   action="store_true",
+                   help="カメラキャプチャを無効化")
     args = p.parse_args()
 
     if args.list_audio_devices:
@@ -1274,6 +1535,15 @@ def main():
     walker.start_planner()
     navigator = GridNavigator(walker, grid, start_xi, start_yi)
 
+    # カメラキャプチャ（Phase 3.1）
+    camera = None
+    if not args.no_camera:
+        camera = CameraCapture(
+            zmq_url=f"tcp://localhost:{args.camera_port}",
+            camera="ego_view",
+        )
+        camera.start()
+
     kb = KeyboardController(walker, player)
     kb.start()
     print(f"✅ 起動完了  モード: {'PTT' if args.ptt else 'VAD'}  動作数: {len(motions)}")
@@ -1286,6 +1556,7 @@ def main():
                 player,
                 walker,
                 navigator=navigator,
+                camera=camera,
                 vad=not args.ptt,
                 mic_device=MIC_DEVICE_ID,
                 out_device=OUT_DEVICE_ID,
@@ -1296,6 +1567,8 @@ def main():
     finally:
         player.stop()
         kb.stop()
+        if camera:
+            camera.stop()
         sock.close()
         ctx.term()
 
