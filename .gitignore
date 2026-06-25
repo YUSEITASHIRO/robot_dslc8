@@ -1,10 +1,12 @@
 # Claude Code
 .claude/
 
-# コンペ用資料（配布対象外）
-docs/
+# コンペ用資料（一時除外リスト）
 pdf_images/
 pdf_pages/
+
+# 外部依存（git submodule で個別取得）
+extern/
 
 # 環境
 *.venv/
