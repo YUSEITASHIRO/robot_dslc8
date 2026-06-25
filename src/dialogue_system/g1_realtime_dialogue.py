@@ -1040,6 +1040,12 @@ class KeyboardController:
 
 # ── Phase 6.2: 音声バックエンド抽象化 ────────────────────────────
 
+try:
+    from aiortc.mediastreams import AudioStreamTrack as _AudioStreamTrackBase
+except ImportError:
+    _AudioStreamTrackBase = object  # type: ignore[assignment, misc]
+
+
 class AudioBackend(abc.ABC):
     """マイク入力とスピーカー出力を抽象化するバックエンド。
     すべての PCM は 24kHz / 16bit / モノラル で扱う。
@@ -1141,26 +1147,19 @@ class PyAudioBackend(AudioBackend):
     async def write_speaker(self, pcm24k: bytes) -> None:
         pcm = np.frombuffer(pcm24k, dtype=np.int16)
         up  = np.repeat(pcm, 2)  # 24000 → 48000
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._out_stream.write, up.tobytes())
 
 
-class _SpeakerTrack:
+class _SpeakerTrack(_AudioStreamTrackBase):
     """aiortc に渡す AudioStreamTrack — RealtimeDialogue の出力を WebRTC ピアへ送る。"""
     kind = "audio"
-    SAMPLE_RATE      = 24000
+    SAMPLE_RATE       = 24000
     SAMPLES_PER_FRAME = 480  # 20ms @ 24kHz
 
     def __init__(self, queue: asyncio.Queue):
-        try:
-            from aiortc.mediastreams import AudioStreamTrack
-            super_class = AudioStreamTrack
-        except ImportError:
-            super_class = object
-        # 動的継承（aiortc が未インストールの場合でも定義を通す）
-        self.__class__ = type("_SpeakerTrack", (super_class,), dict(self.__class__.__dict__))
-        if hasattr(super_class, "__init__"):
-            super_class.__init__(self)  # type: ignore[arg-type]
+        if _AudioStreamTrackBase is not object:
+            super().__init__()
         self._queue = queue
         self._pts   = 0
         self._buf   = bytearray()
