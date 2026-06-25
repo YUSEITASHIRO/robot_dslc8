@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G1 Robot Dialogue Monitor</title>
+<style>
+/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0d1117;
+  --surface:  #161b22;
+  --border:   #30363d;
+  --text:     #e6edf3;
+  --muted:    #8b949e;
+  --green:    #3fb950;
+  --blue:     #58a6ff;
+  --orange:   #d29922;
+  --red:      #f85149;
+  --purple:   #bc8cff;
+  --yellow:   #e3b341;
+  --panel-h:  260px;
+  --radius:   8px;
+  --mono:     "JetBrains Mono", "Fira Code", "Consolas", monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Header ────────────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot.online  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.offline { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+
+#status-text { color: var(--muted); font-size: 11px; }
+
+#phase-badge {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: #607d8b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  transition: background 0.4s;
+}
+
+/* ─── Main grid ─────────────────────────────────────────────────────────────── */
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: var(--panel-h) 1fr var(--panel-h);
+  gap: 6px;
+  padding: 6px;
+  overflow: hidden;
+}
+
+/* ─── Panel card ─────────────────────────────────────────────────────────────── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-header .title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.panel-header .badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ─── Terminal panels (Row 1) ───────────────────────────────────────────────── */
+.log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.log-line.log-start  { color: var(--green); }
+.log-line.log-error  { color: var(--red); }
+.log-line.log-warn   { color: var(--orange); }
+.log-line.log-motion { color: var(--blue); }
+.log-line.log-phase  { color: var(--purple); }
+.log-line.log-vision { color: var(--yellow); }
+
+/* ─── Camera + Transcript row (Row 2, spans full width via sub-grid) ──────── */
+.row-middle {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.cam-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+
+.cam-body img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.cam-body .no-signal {
+  color: var(--muted);
+  font-size: 11px;
+  position: absolute;
+}
+
+.vis-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.vis-badge.visible { background: rgba(63,185,80,0.85); color: #fff; }
+.vis-badge.hidden  { background: rgba(248,81,73,0.85);  color: #fff; }
+
+/* transcript */
+#transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  max-width: 90%;
+}
+.bubble.user      { align-self: flex-end; align-items: flex-end; }
+.bubble.assistant { align-self: flex-start; }
+
+.bubble-label {
+  font-size: 9px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.bubble-text {
+  padding: 5px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.bubble.user      .bubble-text { background: #1f4a7a; color: var(--text); border-bottom-right-radius: 2px; }
+.bubble.assistant .bubble-text { background: #1f3a1f; color: var(--text); border-bottom-left-radius: 2px; }
+
+.bubble-time {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ─── Motion + Controls row (Row 3) ──────────────────────────────────────── */
+.row-bottom {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+#motion-current {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--blue);
+  padding: 8px 12px;
+  transition: color 0.2s;
+}
+
+#motion-current.flash { color: var(--green); }
+
+#motion-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.motion-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  border-bottom: 1px solid rgba(48,54,61,0.5);
+}
+.motion-row.active { color: var(--blue); font-weight: 700; }
+.motion-name { flex: 1; }
+.motion-ts   { color: var(--muted); font-size: 10px; }
+
+/* ─── Controls panel ─────────────────────────────────────────────────────── */
+.controls-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 4px;
+}
+
+.dpad-btn {
+  background: #1f2937;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, transform 0.1s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dpad-btn:active, .dpad-btn.pressed {
+  background: #2d4a6e;
+  transform: scale(0.92);
+}
+.dpad-btn.empty { pointer-events: none; background: transparent; border: none; }
+
+.dpad-row { display: contents; }
+
+.space-btn {
+  padding: 6px 20px;
+  background: #2d2d3a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.space-btn:hover { background: #3a3a4a; }
+
+#key-status {
+  font-size: 11px;
+  color: var(--muted);
+  height: 16px;
+  transition: color 0.1s;
+}
+#key-status.key-flash { color: var(--green); }
+
+.hint {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.bubble { animation: fadeIn 0.2s ease; }
+</style>
+</head>
+<body>
+
+<!-- ─── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+  <div id="status-dot" class="dot offline"></div>
+  <h1>🤖 G1 Robot Dialogue Monitor</h1>
+  <span id="status-text">Connecting…</span>
+  <span id="phase-badge">—</span>
+</header>
+
+<!-- ─── Main ───────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Row 1: Terminal A (Simulator) -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="title">📺 Terminal — Simulator</span>
+    </div>
+    <div class="log-body" id="log-sim"></div>
+  </div>
+
+  <!-- Row 1: Terminal B (Dialogue System) -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="title">📺 Terminal — Dialogue System</span>
+    </div>
+    <div class="log-body" id="log-dial"></div>
+  </div>
+
+  <!-- Row 2: Camera + Transcript (full width) -->
+  <div class="row-middle">
+
+    <!-- User Camera -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="title">👁 User View</span>
+        <span class="badge" id="cam-user-fps">— fps</span>
+      </div>
+      <div class="cam-body">
+        <img id="cam-user" alt="" />
+        <span class="no-signal" id="cam-user-no">No signal</span>
+        <span class="vis-badge" id="cam-user-vis"></span>
+      </div>
+    </div>
+
+    <!-- Robot Camera -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="title">🤖 Robot View (ego_view)</span>
+        <span class="badge" id="cam-robot-fps">— fps</span>
+      </div>
+      <div class="cam-body">
+        <img id="cam-robot" alt="" />
+        <span class="no-signal" id="cam-robot-no">No signal</span>
+      </div>
+    </div>
+
+    <!-- Voice Transcript -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="title">💬 Voice Dialogue</span>
+      </div>
+      <div id="transcript"></div>
+    </div>
+
+  </div><!-- .row-middle -->
+
+  <!-- Row 3: Motion + Controls (full width) -->
+  <div class="row-bottom">
+
+    <!-- Motion Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="title">🦾 Motion</span>
+      </div>
+      <div id="motion-current">— 待機中</div>
+      <div id="motion-history"></div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="title">🕹 User Control (↑↓←→)</span>
+      </div>
+      <div class="controls-body">
+        <!-- D-pad -->
+        <div class="dpad">
+          <div class="dpad-btn empty"></div>
+          <button class="dpad-btn" data-key="ArrowUp"    title="前進 (↑)">↑</button>
+          <div class="dpad-btn empty"></div>
+          <button class="dpad-btn" data-key="ArrowLeft"  title="左転向 (←)">←</button>
+          <div class="dpad-btn empty"></div>
+          <button class="dpad-btn" data-key="ArrowRight" title="右転向 (→)">→</button>
+          <div class="dpad-btn empty"></div>
+          <button class="dpad-btn" data-key="ArrowDown"  title="後退 (↓)">↓</button>
+          <div class="dpad-btn empty"></div>
+        </div>
+
+        <button class="space-btn" data-key=" " title="180° 方向転換">SPACE — 180°反転</button>
+
+        <div id="key-status"></div>
+        <div class="hint">キーボード ↑↓←→ / SPACE でも操作可</div>
+      </div>
+    </div>
+
+  </div><!-- .row-bottom -->
+
+</main>
+
+<!-- "No signal" の非表示: 画像が読み込まれたら非表示 -->
+<script>
+  ["cam-user", "cam-robot"].forEach(id => {
+    const img = document.getElementById(id);
+    const no  = document.getElementById(id + "-no");
+    if (img && no) {
+      img.addEventListener("load", () => { no.style.display = "none"; });
+    }
+  });
+</script>
+
+<script src="/static/main.js"></script>
+</body>
+</html>
