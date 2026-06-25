@@ -15,7 +15,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 KIMODO_DIR="$REPO_ROOT/extern/kimodo"
 
-PYTHON=/home/unitree-g1/anaconda3/bin/python
+PYTHON="${ROBOT_DSLC8_PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+    if [ -f "/tmp/robot_dslc8_venv/bin/python" ]; then
+        PYTHON=/tmp/robot_dslc8_venv/bin/python
+    else
+        PYTHON=python3
+    fi
+fi
 TE_PORT=9550
 TE_URL="http://127.0.0.1:${TE_PORT}/"
 DOCKER_STARTED=0
