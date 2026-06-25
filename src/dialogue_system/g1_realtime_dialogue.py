@@ -57,7 +57,8 @@ VISION_CAMERA_ZMQ        = os.environ.get("VISION_CAMERA_ZMQ", "tcp://localhost:
 VISION_CAMERA            = os.environ.get("VISION_CAMERA", "ego_view")
 VISION_DETAIL            = os.environ.get("VISION_DETAIL", "low").strip().lower()
 VISION_MAX_STALENESS_SEC = float(os.environ.get("VISION_MAX_STALENESS_SEC", "2.0"))
-VISION_SUPPORTED_MODELS  = {"gpt-realtime", "gpt-realtime-2"}
+VISION_SUPPORTED_MODELS  = {"gpt-realtime", "gpt-realtime-2",
+                            "gpt-4o-realtime-preview", "gpt-4o-realtime-preview-2024-12-17"}
 
 SAMPLE_RATE   = 24000
 MIC_RATE      = 48000
@@ -943,7 +944,10 @@ class KeyboardController:
             self._thread.join(timeout=1.0)
 
     def _loop(self):
-        import sys, tty, termios, select
+        if not sys.platform.startswith("linux"):
+            print("[Keyboard] WASD 手動制御は Linux のみ対応しています。スキップします。")
+            return
+        import tty, termios, select
         fd  = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         print("[Keyboard] WASD 手動制御有効 (W=前進 S=後退 A=左旋回 D=右旋回 Space=停止)")
