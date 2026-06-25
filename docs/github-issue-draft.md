@@ -1,4 +1,4 @@
-# [進捗報告] Phase 1〜5 完了・Phase 6〜7 計画
+# [進捗報告] Phase 1〜7 完了・Phase 6.2 保留
 
 ## 概要
 
@@ -6,7 +6,7 @@
 
 ---
 
-## ✅ 完了済み（Phase 1〜5）
+## ✅ 完了済み（Phase 1〜7）
 
 | Phase | 内容 | ブランチ |
 |-------|------|---------|
@@ -29,7 +29,7 @@
 
 ## 🔲 残課題・未実装
 
-### 中優先度
+### 中優先度（仕様待ち）
 
 - **Phase 6.2: WebRTC 音声バックエンド対応**
   - 運営提供の仕様が確定後に対応
@@ -47,9 +47,10 @@
 | 課題 | 詳細 | 回避策 |
 |------|------|--------|
 | VAD 誤検出 | エコーゲート期間外でも TTS の残響が speech_started を引き起こす可能性 | ECHO_GATE_COOLDOWN_S を延長（現在 0.40s） |
-| look_around レイテンシ | GPT-4o Vision API 呼び出しで 2〜4s かかる | シーンキャッシュで軽減（Phase 5.2）|
+| look_around レイテンシ | GPT-4o Vision API 呼び出しで 2〜4s かかる | シーンキャッシュで軽減（Phase 5.2） |
 | 旋回精度 | TURN_REPEAT_COUNT=5 でも環境によっては角度がずれる | TURN_STEP_DEG で微調整 |
 | WebRTC 未対応 | 予選・本選時の音声通信方式が異なる | 運営提供仕様待ち（Phase 6.2） |
+| フェーズ誤遷移 | キーワード検出が誤検出するケースあり（「奥」が別文脈で出現等） | 閾値調整・ターン数との組み合わせで抑制 |
 
 ---
 
@@ -69,4 +70,4 @@
 2. `feat/phase6-strategy` の PR を作成して `main` にマージ
 3. 運営から WebRTC 仕様が届いたら Phase 6.2 に対応
 
-/label: progress, phase5, planning
+/label: progress, phase7, planning
