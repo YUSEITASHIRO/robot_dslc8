@@ -28,7 +28,16 @@ if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "your-api-key-here" ]; then
     exit 1
 fi
 
-conda activate g1_deploy 2>/dev/null || true
+# Python 環境を決定: g1_deploy conda > /tmp/robot_dslc8_venv > system python3
+if command -v conda &>/dev/null && conda activate g1_deploy 2>/dev/null; then
+    PYTHON=python
+elif [ -f "/tmp/robot_dslc8_venv/bin/python" ]; then
+    source /tmp/robot_dslc8_venv/bin/activate
+    PYTHON=python
+else
+    PYTHON=python3
+fi
+
 cd "$REPO_ROOT/src/dialogue_system"
 
-python g1_realtime_dialogue.py "$@"
+$PYTHON g1_realtime_dialogue.py "$@"
