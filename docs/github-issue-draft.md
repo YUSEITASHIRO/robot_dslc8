@@ -73,9 +73,58 @@
 
 ---
 
+## 🖥 Phase 8: デバッグ Web UI（外付けモニター）
+
+`feat/webui` ブランチに実装済み。内部コード変更なし。
+
+### パネル構成
+
+| パネル | データソース |
+|--------|------------|
+| Terminal A（シミュレータ起動ログ） | subprocess stdout / ログファイル tail |
+| Terminal B（対話システムログ） | subprocess stdout / ログファイル tail |
+| ユーザ視点カメラ（user_eye） | ZMQ :5555 → base64 JPEG → WebSocket |
+| ロボット視点カメラ（ego_view） | ZMQ :5555 → base64 JPEG → WebSocket |
+| 音声対話トランスクリプト | stdout から `[User]` / `[AI]` 行を抽出 |
+| 動作履歴 | stdout から `[Motion] playing:` 行を抽出 |
+
+### ユーザ移動（FPS 制御）
+
+`base_sim.py:DefaultEnv.move_user()` は GLFW キーコード 262–265 で mocap body を 0.15m 移動。
+ブラウザの ↑↓←→ → WebSocket → `ctypes.PostMessageW(mujoco_hwnd, WM_KEYDOWN, VK_*, 0)` で転送（フォーカス不要）。
+
+### 起動方法
+
+```bash
+pip install -r webui/requirements.txt
+
+# ログファイルを監視する場合（プロセスは別途起動済み）
+python webui/bridge.py --sim-log /tmp/sim.log --dialogue-log /tmp/dial.log
+
+# サブプロセスとして起動する場合
+python webui/bridge.py \
+  --launch-sim     "python patches/.../run_sim.py" \
+  --launch-dialogue "python src/dialogue_system/g1_realtime_dialogue.py"
+
+# → http://localhost:8765 をブラウザで開く
+```
+
+### 実装ファイル
+
+```
+webui/
+├── bridge.py        # aiohttp WebSocket サーバー + ZMQ→WS 変換 + キー注入
+├── index.html       # 6 パネルレイアウト（ダークテーマ）
+├── static/main.js   # WebSocket クライアント + キー制御 + パネル更新
+└── requirements.txt # 追加依存 (aiohttp, pywin32, pyautogui)
+```
+
+---
+
 ## 次のアクション
 
-1. `fix/webrtc-speaker-track` の PR をレビュー・マージ
-2. 運営から WebRTC 仕様が届いたら Phase 6.2 本実装（`WebRTCAudioBackend` 差し替えのみ）
+1. `feat/webui` の PR を作成・マージ
+2. 実機 Linux 環境で `xdotool` によるキー注入を動作確認
+3. 運営から WebRTC 仕様が届いたら Phase 6.2 本実装（`WebRTCAudioBackend` 差し替えのみ）
 
-/label: progress, phase7, planning
+/label: progress, phase8, webui, planning

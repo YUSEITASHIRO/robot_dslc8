@@ -1,0 +1,7 @@
+# webui/requirements.txt — Web UI ブリッジサーバー追加依存
+aiohttp>=3.9
+msgpack>=1.0
+pyzmq>=25.0
+# Windows でのキー注入
+pyautogui>=0.9.54; sys_platform=="win32"
+pywin32>=306;      sys_platform=="win32"
