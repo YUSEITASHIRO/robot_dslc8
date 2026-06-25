@@ -52,6 +52,12 @@ VAD_THRESHOLD          = 0.5   # 音声検出感度（0.0〜1.0）
 VAD_PREFIX_PADDING_MS  = 200   # 発話開始前の余白（ms）。小さいほど早く反応
 VAD_SILENCE_DURATION_MS = 500  # 沈黙判定時間（ms）。小さいほど早く応答開始
 
+# Phase 5.1: エコーキャンセル — 音声ゲートパラメータ
+ECHO_GATE_COOLDOWN_S = 0.40    # TTS終了後にマイクを再開するまでの待機（秒）
+
+# Phase 5.2: シーンキャッシュ
+SCENE_CACHE_TTL_S = 30.0       # look_around 結果のキャッシュ有効期間（秒）
+
 VISION_ENABLED           = os.environ.get("VISION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 VISION_CAMERA_ZMQ        = os.environ.get("VISION_CAMERA_ZMQ", "tcp://localhost:5555")
 VISION_CAMERA            = os.environ.get("VISION_CAMERA", "ego_view")
@@ -1008,6 +1014,9 @@ class RealtimeDialogue:
         self._abuf    = bytearray()
         self._nav_lock         = threading.Lock()
         self._backchannel_timer: Optional[threading.Timer] = None
+        self._speaking_until: float = 0.0   # Phase 5.1: TTS再生中はここまでマイクをゲート
+        self._scene_cache: Optional[str] = None          # Phase 5.2: Vision解析キャッシュ
+        self._scene_cache_ts: float = 0.0               # Phase 5.2: キャッシュ取得時刻
 
     # ── Phase 3.2: バックチャネル相づち ──────────────────────────
 
@@ -1044,6 +1053,9 @@ class RealtimeDialogue:
         """最新カメラ映像を GPT-4o Vision で解析してシーン説明を返す。"""
         if self.camera is None:
             return "カメラ未接続"
+        # Phase 5.2: キャッシュが有効なら再利用（Vision API 節約）
+        if self._scene_cache and (time.monotonic() - self._scene_cache_ts) < SCENE_CACHE_TTL_S:
+            return self._scene_cache
         b64 = self.camera.get_latest_b64()
         if b64 is None:
             return "映像未受信（シミュレーターが起動しているか確認してください）"
@@ -1089,9 +1101,20 @@ class RealtimeDialogue:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     return json.loads(resp.read())
             result = await loop.run_in_executor(None, _call)
-            return result["choices"][0]["message"]["content"]
+            desc = result["choices"][0]["message"]["content"]
+            self._scene_cache = desc          # Phase 5.2: キャッシュ更新
+            self._scene_cache_ts = time.monotonic()
+            return desc
         except Exception as e:
             return f"解析エラー: {e}"
+
+    async def _initial_scene_scan(self):
+        """接続後に初回シーンスキャンを実施してキャッシュを温める。"""
+        await asyncio.sleep(3.0)
+        if self.camera:
+            print("[Vision] 初回シーンスキャン中...")
+            desc = await self._analyze_scene()
+            print(f"[Vision] 初回スキャン完了: {desc[:60]}...")
 
     async def _submit_scene_analysis(self, call_id: str):
         """look_around の結果（Vision解析）を Realtime API に返す。"""
@@ -1250,6 +1273,7 @@ class RealtimeDialogue:
                 "silence_duration_ms": VAD_SILENCE_DURATION_MS,
             }
         await self._ws.send(json.dumps({"type": "session.update", "session": cfg}))
+        asyncio.create_task(self._initial_scene_scan())  # Phase 5.2: 接続後にキャッシュを温める
 
     async def _send(self, msg):
         if self._ws:
@@ -1291,6 +1315,8 @@ class RealtimeDialogue:
         try:
             while True:
                 pcm = await q.get()
+                if time.monotonic() < self._speaking_until:
+                    continue  # Phase 5.1: TTS再生中はマイクをゲート（エコーキャンセル）
                 await self._send({
                     "type": "input_audio_buffer.append",
                     "audio": base64.b64encode(pcm).decode(),
@@ -1328,6 +1354,7 @@ class RealtimeDialogue:
                     pcm = np.frombuffer(chunk, dtype=np.int16)
                     up = np.repeat(pcm, 2)  # 24000 → 48000
                     stream.write(up.tobytes())
+                    self._speaking_until = time.monotonic() + ECHO_GATE_COOLDOWN_S  # Phase 5.1
                 else:
                     await asyncio.sleep(0.01)
         finally:
@@ -1476,10 +1503,15 @@ class RealtimeDialogue:
                 print()
 
             elif t == "input_audio_buffer.speech_started":
-                print("\n🎤 [話し中...]")
-                self._abuf = bytearray()    # ロボット音声を即時停止（full-duplex）
-                self.walker.stop()          # 移動・ナビゲーション中断
-                self._schedule_backchannel()  # 1.5s 後に相づち nod
+                if time.monotonic() < self._speaking_until:
+                    # Phase 5.1: エコー由来の誤検出 — ゲートを延長して無視
+                    self._speaking_until = time.monotonic() + ECHO_GATE_COOLDOWN_S
+                    print("\n[Echo] TTS中に音声検出（エコーとして無視）")
+                else:
+                    print("\n🎤 [話し中...]")
+                    self._abuf = bytearray()    # ロボット音声を即時停止（full-duplex）
+                    self.walker.stop()          # 移動・ナビゲーション中断
+                    self._schedule_backchannel()  # 1.5s 後に相づち nod
 
             elif t == "input_audio_buffer.speech_stopped":
                 self._cancel_backchannel()
