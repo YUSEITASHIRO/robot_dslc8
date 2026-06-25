@@ -1,0 +1,161 @@
+<mujoco model="g1_43dof scene">
+  <include file="g1_29dof_with_hand.xml"/>
+
+  <!-- center = robot start position (pelvis height ~0.8m) -->
+  <statistic center="0 0 0.8" extent="4.0"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <!-- azimuth=-45: free camera at SE corner of new scene (entrance-right), looking NW into store -->
+    <global azimuth="-45" elevation="-25" offwidth="1024" offheight="1024"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.25 0.20 0.15" rgb2="0.18 0.14 0.10"
+      markrgb="0.70 0.65 0.55" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="8 4" reflectance="0.15"/>
+    <material name="wall_mat" rgba="0.75 0.70 0.60 0.7"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 4 4" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- ─── 店舗レイアウト (robot-centric coords: +x=前方/toward-user, +y=左)
+         Robot起動位置: (0, 0)  前方 (+x) = ユーザー方向
+         奥の壁: y=9   入口の壁: y=-1   右壁: x=-2   左壁: x=2 (y≥1)
+         室内サイズ: x∈[-2,2]  y∈[-1,9]
+    ──────────────────────────────────────────────────────────── -->
+    <!-- 奥の壁 (y=9) -->
+    <geom name="wall_back" type="box" size="2.0 0.05 0.75"
+          pos="0 9 0.75" material="wall_mat" contype="1" conaffinity="1"/>
+    <!-- 入口の壁 (y=-1) -->
+    <geom name="wall_front" type="box" size="2.0 0.05 0.75"
+          pos="0 -1 0.75" material="wall_mat" contype="1" conaffinity="1"/>
+    <!-- 左壁 (x=2, y:1..9 — 入口開口部 y=-1..1 を除く) -->
+    <geom name="wall_left" type="box" size="0.05 4.0 0.75"
+          pos="2 5 0.75" material="wall_mat" contype="1" conaffinity="1"/>
+    <!-- 入口左仕切り (x=1.0..2.0, y≈1) — shortened, flush with left wall -->
+    <geom name="wall_half_partition" type="box" size="0.5 0.05 0.75"
+          pos="1.5 1 0.75" material="wall_mat" contype="1" conaffinity="1"/>
+    <!-- 右壁 (x=-2, y:-1..9) -->
+    <geom name="wall_right" type="box" size="0.05 5.05 0.75"
+          pos="-2 4 0.75" material="wall_mat" contype="1" conaffinity="1"/>
+
+    <!-- ─── 商品陳列棚 (左壁沿い, x=+1.78) ─────────────────────
+    ──────────────────────────────────────────────────────────── -->
+    <geom name="shelf_north_back" type="box" size="0.2 1.5 0.38"
+          pos="1.78 7.5 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+    <geom name="shelf_north_mid" type="box" size="0.2 2.5 0.38"
+          pos="1.78 3.5 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+
+    <!-- ─── 商品陳列棚 (右壁沿い, x=-1.78) ─────────────────────
+    ──────────────────────────────────────────────────────────── -->
+    <geom name="shelf_south_back" type="box" size="0.2 1.5 0.38"
+          pos="-1.78 7.5 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+    <geom name="shelf_south_mid" type="box" size="0.2 2.5 0.38"
+          pos="-1.78 3.5 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+
+    <!-- ─── 追加棚 (入口エリア) ────────────────────────────────
+         ① 右壁沿い Robot後方: x=-1.78, y=-1..1
+         ② 仕切り前棚: x=1.1..1.9, y=1.25 (shortened to match partition)
+    ──────────────────────────────────────────────────────────── -->
+    <geom name="shelf_south_east" type="box" size="0.2 1.0 0.38"
+          pos="-1.78 0 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+    <geom name="shelf_partition_side" type="box" size="0.4 0.2 0.38"
+          pos="1.5 1.25 0.38" rgba="0.55 0.38 0.22 1" contype="1" conaffinity="1"/>
+
+    <!-- ─── 商談カウンター (奥, y≈7.8) ──────────────────────── -->
+    <geom name="counter_table" type="box" size="0.9 0.4 0.38"
+          pos="-0.5 7.8 0.38" rgba="0.30 0.28 0.22 1" contype="1" conaffinity="1"/>
+    <geom name="counter_chair_outer1" type="cylinder" size="0.2 0.225"
+          pos="0 7.05 0.225" rgba="0.40 0.35 0.30 1" contype="1" conaffinity="1"/>
+    <geom name="counter_chair_outer2" type="cylinder" size="0.2 0.225"
+          pos="-1 7.05 0.225" rgba="0.40 0.35 0.30 1" contype="1" conaffinity="1"/>
+    <geom name="counter_chair_inner" type="cylinder" size="0.2 0.225"
+          pos="-0.5 8.55 0.225" rgba="0.40 0.35 0.30 1" contype="1" conaffinity="1"/>
+
+    <!-- ─── レジカウンター ──────────────────────────────────── -->
+    <geom name="register_counter" type="box" size="0.2 0.35 0.38"
+          pos="0.65 7.8 0.38" rgba="0.82 0.80 0.75 1" contype="1" conaffinity="1"/>
+    <geom name="register_terminal" type="box" size="0.07 0.07 0.17"
+          pos="0.65 7.45 0.82" rgba="0.15 0.15 0.18 1" contype="1" conaffinity="1"/>
+
+    <!-- ─── カメラ ────────────────────────────────────────────
+         C キーで cycling: 自由 → ego_view → user_eye → counter
+
+         ego_view : robot頭部 (+x前方) から
+         user_eye : ユーザー視点 (-x方向=店内)
+         counter  : 店奥 (y=7.5, h=2.0m) から入口 (-y) を望む・俯瞰
+    ──────────────────────────────────────────────────────────── -->
+    <!-- pos=(0, 7.5, 2.0): 店奥カウンター付近から俯瞰
+         xyaxes: X=(-1,0,0)右ベクトル, Y=(0,-0.5,0.866)→上向き(入口側に少し傾く)
+         looking direction = -(X×Y) = (0,-0.866,-0.5) ≈ -y かつ若干下向き -->
+    <camera name="counter"
+            pos="0 7.5 2.0"
+            xyaxes="-1 0 0  0 -0.5 0.866"
+            fovy="80"/>
+
+    <!-- ─── その他 ───────────────────────────────────────── -->
+    <!-- robot 初期位置マーカー (赤球) -->
+    <site name="com_marker" pos="0.0 0.0 0.05" size="0.05" rgba="1 0 0 1" type="sphere"/>
+
+
+    <!-- ─── Grid waypoints (1m間隔, robot-centric) ─────────────────────────── -->
+    <!-- 20 valid cells: xi∈{-1,0,1}  yi∈{0..8}  margin=0.40m -->
+    <!-- xi=-1 (right side) -->
+    <geom name="grid_n1_0"  type="cylinder" pos="-1.0  0.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_1"  type="cylinder" pos="-1.0  1.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_2"  type="cylinder" pos="-1.0  2.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_3"  type="cylinder" pos="-1.0  3.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_4"  type="cylinder" pos="-1.0  4.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_5"  type="cylinder" pos="-1.0  5.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_n1_6"  type="cylinder" pos="-1.0  6.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <!-- xi=0 (center) -->
+    <geom name="grid_0_0"   type="cylinder" pos=" 0.0  0.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_1"   type="cylinder" pos=" 0.0  1.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_2"   type="cylinder" pos=" 0.0  2.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_3"   type="cylinder" pos=" 0.0  3.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_4"   type="cylinder" pos=" 0.0  4.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_5"   type="cylinder" pos=" 0.0  5.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_0_6"   type="cylinder" pos=" 0.0  6.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <!-- xi=1 (left side) — (1,1) blocked by partition -->
+    <geom name="grid_1_0"   type="cylinder" pos=" 1.0  0.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_1_2"   type="cylinder" pos=" 1.0  2.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_1_3"   type="cylinder" pos=" 1.0  3.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_1_4"   type="cylinder" pos=" 1.0  4.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_1_5"   type="cylinder" pos=" 1.0  5.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+    <geom name="grid_1_6"   type="cylinder" pos=" 1.0  6.0 0.003" size="0.10 0.003" rgba="0.1 0.6 1 0.6" contype="0" conaffinity="0"/>
+
+    <!-- ─── User (~1.27m tall = G1 height, natural proportions) ─
+         Body origin = waist (world z=0.65). Feet world z≈0, head top ≈1.27m.
+         Neck capsule r=0.035 creates visible gap between torso and head.
+         quat=(0,0,0,1) → local+x points to world -x (toward store).
+    ──────────────────────────────────────────────────────────── -->
+    <body name="user" mocap="true" pos="1.5 0 0.65" quat="0 0 0 1">
+      <!-- head: r=0.10, center body_z=0.52 → world top=1.27m -->
+      <geom type="sphere" size="0.10" pos="0 0 0.52" rgba="0.8 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <!-- eyes -->
+      <geom type="sphere" size="0.025" pos="0.10  0.04 0.535" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+      <geom type="sphere" size="0.025" pos="0.10 -0.04 0.535" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+      <!-- neck: torso top → head bottom, thin r=0.035 -->
+      <geom type="capsule" fromto="0 0 0.37 0 0 0.42" size="0.035" rgba="0.8 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <!-- torso: shoulder(body_z=0.37) to waist(body_z=0.02), r=0.095 -->
+      <geom type="capsule" fromto="0 0 0.37 0 0 0.02" size="0.095" rgba="0.4 0.6 0.9 1" contype="0" conaffinity="0"/>
+      <!-- arms: shoulder to hand -->
+      <geom type="capsule" fromto="0  0.13 0.34 0  0.15 -0.13" size="0.055" rgba="0.8 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <geom type="capsule" fromto="0 -0.13 0.34 0 -0.15 -0.13" size="0.055" rgba="0.8 0.6 0.4 1" contype="0" conaffinity="0"/>
+      <!-- legs: hip to foot; bottom=0.65-0.59-0.06=0m -->
+      <geom type="capsule" fromto="0  0.075 0.00 0  0.085 -0.59" size="0.06" rgba="0.4 0.6 0.9 1" contype="0" conaffinity="0"/>
+      <geom type="capsule" fromto="0 -0.075 0.00 0 -0.085 -0.59" size="0.06" rgba="0.4 0.6 0.9 1" contype="0" conaffinity="0"/>
+      <camera name="user_eye" pos="0.11 0 0.535" xyaxes="0 -1 0 0 0 1" fovy="70"/>
+    </body>
+
+  </worldbody>
+
+  <default>
+    <geom friction="1.0"/>
+  </default>
+</mujoco>
