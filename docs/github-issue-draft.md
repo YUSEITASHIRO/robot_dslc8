@@ -25,6 +25,7 @@
 | **7.1** | バックグラウンドシーン監視（25s 間隔で Vision スキャン・部長の動き検出） | feat/phase6-strategy |
 | **7.2** | 対話者位置追従ナビゲーション（Vision 結果から奥エリア移動を検出して先回り誘導） | feat/phase6-strategy |
 | **6.2** | `AudioBackend` 抽象化 + `WebRTCAudioBackend`（aiortc + aiohttp）、`--webrtc` フラグで切替 | feat/phase6.2-webrtc |
+| **8** | デバッグ Web UI（外付けモニター）— カメラ映像×2・ターミナル×2・対話・動作を一画面表示、↑↓←→ FPS 制御 | feat/webui (PR #11) |
 
 ---
 
