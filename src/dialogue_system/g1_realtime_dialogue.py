@@ -33,8 +33,8 @@ HEADER_SIZE = 1280
 SONIC_FPS   = 50
 CHUNK_SIZE  = 5
 WALK_STEP_DURATION   = 0.35
-TURN_REPEAT_COUNT    = 2
-TURN_REPEAT_INTERVAL = 0.08
+TURN_REPEAT_COUNT    = 5       # 運営推奨値（旋回の安定性向上）
+TURN_REPEAT_INTERVAL = 0.05    # 運営推奨値（応答性向上）
 TURN_STEP_DEG        = 15.0    # 1回の旋回量（度）
 TURN_SETTLE_S        = 1.2     # 旋回後の足位置安定待機（秒）
 FOOT_REALIGN_S       = 0.35    # 旋回後の微調整歩行（秒）
@@ -43,6 +43,21 @@ SETTLE_TICK_S        = 0.05    # 安定待機の刻み幅
 METERS_PER_STEP  = 0.35        # 1 WBC ステップあたりの移動距離（m）
 GRID_STEP_M      = 1.00        # グリッド間隔（m）
 SAFETY_MARGIN    = 0.40        # 壁・障害物からの安全距離（m）
+
+# Phase 4.2: 転倒防止 — ナビゲーション watchdog
+NAV_TIMEOUT_S    = 60.0        # navigate_to の最大許容時間（秒）。超過で強制停止
+
+# Phase 4.3: レイテンシ最適化 — Realtime API VAD パラメータ
+VAD_THRESHOLD          = 0.5   # 音声検出感度（0.0〜1.0）
+VAD_PREFIX_PADDING_MS  = 200   # 発話開始前の余白（ms）。小さいほど早く反応
+VAD_SILENCE_DURATION_MS = 500  # 沈黙判定時間（ms）。小さいほど早く応答開始
+
+VISION_ENABLED           = os.environ.get("VISION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+VISION_CAMERA_ZMQ        = os.environ.get("VISION_CAMERA_ZMQ", "tcp://localhost:5555")
+VISION_CAMERA            = os.environ.get("VISION_CAMERA", "ego_view")
+VISION_DETAIL            = os.environ.get("VISION_DETAIL", "low").strip().lower()
+VISION_MAX_STALENESS_SEC = float(os.environ.get("VISION_MAX_STALENESS_SEC", "2.0"))
+VISION_SUPPORTED_MODELS  = {"gpt-realtime", "gpt-realtime-2"}
 
 SAMPLE_RATE   = 24000
 MIC_RATE      = 48000
@@ -799,50 +814,76 @@ class GridNavigator:
         return True
 
 
-# ── カメラキャプチャ（Phase 3.1） ─────────────────────────────
+# ── カメラサブスクライバー（Phase 3.1 → 運営提供アーキテクチャに移行） ──────
 
-class CameraCapture:
-    """ZMQ カメラストリームから最新フレームをバックグラウンドでキャプチャ。"""
+class CameraFrameSubscriber:
+    """ZMQ カメラストリームを購読し、鮮度チェック付きで最新フレームを提供する。
 
-    def __init__(self, zmq_url: str = "tcp://localhost:5555",
-                 camera: str = "ego_view"):
-        self._url    = zmq_url
-        self._camera = camera
-        self._latest_jpg: Optional[bytes] = None
-        self._lock   = threading.Lock()
-        self._stop   = threading.Event()
+    運営提供の CameraFrameSubscriber をベースに look_around 互換 API を追加。
+    """
+
+    def __init__(self, zmq_url: str, camera: str,
+                 max_staleness_sec: float, detail: str):
+        self.zmq_url          = zmq_url
+        self.camera           = camera
+        self.max_staleness_sec = max_staleness_sec
+        self.detail           = detail if detail in {"low", "auto", "high"} else "low"
+        self._stop            = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._connected = False
+        self._lock            = threading.Lock()
+        self._latest          = None
+        self._fallback_warned = False
+        self._missing_warned  = False
 
     def start(self):
-        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        import importlib.util
+        if importlib.util.find_spec("msgpack") is None:
+            print("[Vision] msgpack が見つかりません。pip install msgpack")
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        print(f"[Vision] カメラ購読: {self.zmq_url}  camera={self.camera}")
 
     def stop(self):
         self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+    def latest_image(self):
+        """最新フレームを {"camera", "image_url", "timestamp", "age"} で返す。未受信 or 古い場合は None。"""
+        with self._lock:
+            latest = self._latest.copy() if self._latest else None
+        if not latest:
+            if not self._missing_warned:
+                print("[Vision] まだカメラ画像を受信していません。")
+                self._missing_warned = True
+            return None
+        age = time.time() - latest["timestamp"]
+        if age > self.max_staleness_sec:
+            print(f"[Vision] カメラ画像が古いです ({age:.1f}s)。スキップします。")
+            return None
+        latest["age"] = age
+        return latest
 
     def get_latest_b64(self) -> Optional[str]:
-        """最新フレームを base64 JPEG 文字列で返す。未受信は None。"""
-        with self._lock:
-            if self._latest_jpg:
-                return base64.b64encode(self._latest_jpg).decode()
+        """look_around 互換: base64 JPEG 文字列を返す（data: プレフィックスなし）。"""
+        frame = self.latest_image()
+        if frame is None:
             return None
+        url = frame["image_url"]
+        prefix = "data:image/jpeg;base64,"
+        return url[len(prefix):] if url.startswith(prefix) else url
 
-    def _recv_loop(self):
-        try:
-            import msgpack
-        except ImportError:
-            print("[Camera] msgpack が見つかりません — pip install msgpack")
-            return
+    def _run(self):
+        import msgpack
 
         ctx = zmq.Context()
         sock = ctx.socket(zmq.SUB)
         sock.setsockopt(zmq.SUBSCRIBE, b"")
-        sock.setsockopt(zmq.CONFLATE, 1)   # 最新フレームのみ保持
-        sock.setsockopt(zmq.RCVTIMEO, 500)
-        sock.connect(self._url)
-        print(f"[Camera] ZMQ 接続: {self._url}  カメラ: {self._camera}")
-
+        sock.setsockopt(zmq.CONFLATE, 1)
+        sock.setsockopt(zmq.RCVTIMEO, 200)
+        sock.setsockopt(zmq.LINGER, 0)
+        sock.connect(self.zmq_url)
         try:
             while not self._stop.is_set():
                 try:
@@ -851,18 +892,32 @@ class CameraCapture:
                     continue
                 try:
                     payload = msgpack.unpackb(raw, raw=False)
-                    images  = payload.get("images", {}) if isinstance(payload, dict) else {}
-                    encoded = (images.get(self._camera)
-                               or (next(iter(images.values())) if images else None))
-                    if encoded:
-                        jpg = base64.b64decode(encoded)
-                        with self._lock:
-                            self._latest_jpg = jpg
-                        if not self._connected:
-                            self._connected = True
-                            print("[Camera] 映像受信開始")
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[Vision] payload decode 失敗: {e}")
+                    continue
+
+                images = payload.get("images", {}) if isinstance(payload, dict) else {}
+                if not images:
+                    continue
+
+                camera = self.camera if self.camera in images else next(iter(images))
+                if camera != self.camera and not self._fallback_warned:
+                    print(f"[Vision] camera={self.camera} がないため {camera} を使用します")
+                    self._fallback_warned = True
+
+                encoded = images.get(camera)
+                if not encoded:
+                    continue
+                if isinstance(encoded, bytes):
+                    encoded = encoded.decode("utf-8")
+
+                with self._lock:
+                    self._latest = {
+                        "camera":    camera,
+                        "image_url": f"data:image/jpeg;base64,{encoded}",
+                        "timestamp": time.time(),
+                    }
+                    self._missing_warned = False
         finally:
             sock.close(0)
             ctx.term()
@@ -932,7 +987,7 @@ class RealtimeDialogue:
         player: MotionPlayer,
         walker,
         navigator: Optional["GridNavigator"] = None,
-        camera: Optional["CameraCapture"] = None,
+        camera: Optional["CameraFrameSubscriber"] = None,
         vad: bool = True,
         mic_device=None,
         out_device=None,
@@ -1183,11 +1238,12 @@ class RealtimeDialogue:
             "tool_choice": "auto",
         }
         if self.vad:
+            # Phase 4.3: VAD パラメータをトップレベル定数で管理（レイテンシ最適化）
             cfg["turn_detection"] = {
                 "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 800,
+                "threshold": VAD_THRESHOLD,
+                "prefix_padding_ms": VAD_PREFIX_PADDING_MS,
+                "silence_duration_ms": VAD_SILENCE_DURATION_MS,
             }
         await self._ws.send(json.dumps({"type": "session.update", "session": cfg}))
 
@@ -1358,7 +1414,17 @@ class RealtimeDialogue:
                                 self.player.stop()
                                 self.walker.switch_to_planner()
                                 with self._nav_lock:
-                                    self.navigator.goto(xi, yi, facing_deg=fd)
+                                    # Phase 4.2: watchdog — NAV_TIMEOUT_S 超過で強制停止
+                                    done = threading.Event()
+                                    result: list = [False]
+                                    def _run():
+                                        result[0] = self.navigator.goto(xi, yi, facing_deg=fd)
+                                        done.set()
+                                    t = threading.Thread(target=_run, daemon=True)
+                                    t.start()
+                                    if not done.wait(timeout=NAV_TIMEOUT_S):
+                                        print(f"\n[Nav警告] タイムアウト({NAV_TIMEOUT_S}s) — 強制停止")
+                                        self.walker.stop()
                             threading.Thread(target=_nav, daemon=True).start()
                     except Exception as e:
                         print(f"\n[Navエラー] {e}")
@@ -1549,12 +1615,17 @@ def main():
     walker.start_planner()
     navigator = GridNavigator(walker, grid, start_xi, start_yi)
 
-    # カメラキャプチャ（Phase 3.1）
+    # カメラ購読（Phase 3.1 → CameraFrameSubscriber）
     camera = None
-    if not args.no_camera:
-        camera = CameraCapture(
-            zmq_url=f"tcp://localhost:{args.camera_port}",
-            camera="ego_view",
+    camera_enabled = VISION_ENABLED or (not args.no_camera)
+    if camera_enabled:
+        if VISION_ENABLED and OPENAI_REALTIME_MODEL not in VISION_SUPPORTED_MODELS:
+            print(f"[Vision] 警告: {OPENAI_REALTIME_MODEL} は画像入力対応確認済みモデルではありません。")
+        camera = CameraFrameSubscriber(
+            zmq_url=VISION_CAMERA_ZMQ if VISION_ENABLED else f"tcp://localhost:{args.camera_port}",
+            camera=VISION_CAMERA if VISION_ENABLED else "ego_view",
+            max_staleness_sec=VISION_MAX_STALENESS_SEC,
+            detail=VISION_DETAIL,
         )
         camera.start()
 
