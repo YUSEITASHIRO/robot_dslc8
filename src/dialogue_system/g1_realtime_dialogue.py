@@ -6,9 +6,11 @@ OpenAI Realtime API (日本語) + Kimodo 動作ライブラリ → SONIC ZMQ
 動作データは data/motions/<name>/sample_1.npz から読み込みます。
 """
 
+import abc
 import argparse
 import asyncio
 import base64
+import fractions
 import json
 import math
 import os
@@ -1036,6 +1038,262 @@ class KeyboardController:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+# ── Phase 6.2: 音声バックエンド抽象化 ────────────────────────────
+
+class AudioBackend(abc.ABC):
+    """マイク入力とスピーカー出力を抽象化するバックエンド。
+    すべての PCM は 24kHz / 16bit / モノラル で扱う。
+    """
+
+    async def start(self) -> None:
+        """バックエンドを起動する（デバイスオープン・接続確立等）。"""
+
+    async def stop(self) -> None:
+        """バックエンドを停止してリソースを解放する。"""
+
+    @abc.abstractmethod
+    async def read_mic(self) -> bytes:
+        """マイクから PCM16 24kHz チャンクを1つ返す（ブロッキング）。"""
+
+    @abc.abstractmethod
+    async def write_speaker(self, pcm24k: bytes) -> None:
+        """PCM16 24kHz チャンクをスピーカーへ出力する。"""
+
+
+class PyAudioBackend(AudioBackend):
+    """pyaudio を使ったローカルデバイスバックエンド（デフォルト）。"""
+
+    def __init__(self, mic_device=None, out_device=None):
+        self._mic_device = _normalize_device_selector(mic_device)
+        self._out_device = _normalize_device_selector(out_device)
+        self._pa_in  = None
+        self._pa_out = None
+        self._in_stream  = None
+        self._out_stream = None
+        self._mic_queue: asyncio.Queue = asyncio.Queue()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    async def start(self) -> None:
+        import pyaudio
+        self._loop = asyncio.get_event_loop()
+
+        if _restart_pipewire_services_if_available():
+            await asyncio.sleep(3)
+
+        # マイク
+        self._pa_in = pyaudio.PyAudio()
+        dev_in = resolve_audio_device(self._pa_in, self._mic_device, is_input=True, purpose="マイク")
+        if dev_in is None:
+            self._pa_in.terminate()
+            raise RuntimeError("[マイク] 入力デバイスが見つかりません")
+        info = self._pa_in.get_device_info_by_index(dev_in)
+        print(f"[マイク] {info['name']} device={dev_in}, 48000Hz → 24000Hz")
+
+        loop = self._loop
+        q    = self._mic_queue
+
+        def _mic_cb(in_data, frame_count, time_info, status):
+            pcm  = np.frombuffer(in_data, dtype=np.int16)
+            down = pcm[::2]  # 48000 → 24000
+            loop.call_soon_threadsafe(q.put_nowait, down.tobytes())
+            return (None, pyaudio.paContinue)
+
+        self._in_stream = self._pa_in.open(
+            format=pyaudio.paInt16, channels=1, rate=48000,
+            input=True, input_device_index=dev_in,
+            frames_per_buffer=2048, stream_callback=_mic_cb,
+        )
+        self._in_stream.start_stream()
+
+        # スピーカー
+        self._pa_out = pyaudio.PyAudio()
+        dev_out = resolve_audio_device(self._pa_out, self._out_device, is_input=False, purpose="スピーカー")
+        if dev_out is None:
+            self._pa_out.terminate()
+            raise RuntimeError("[スピーカー] 出力デバイスが見つかりません")
+        info = self._pa_out.get_device_info_by_index(dev_out)
+        print(f"[スピーカー] {info['name']} device={dev_out}, 48000Hz")
+
+        self._out_stream = self._pa_out.open(
+            format=pyaudio.paInt16, channels=1, rate=48000,
+            output=True, output_device_index=dev_out,
+            frames_per_buffer=4096,
+        )
+        self._out_stream.start_stream()
+
+    async def stop(self) -> None:
+        for s in (self._in_stream, self._out_stream):
+            if s:
+                try:
+                    s.stop_stream(); s.close()
+                except Exception:
+                    pass
+        for pa in (self._pa_in, self._pa_out):
+            if pa:
+                try:
+                    pa.terminate()
+                except Exception:
+                    pass
+
+    async def read_mic(self) -> bytes:
+        return await self._mic_queue.get()
+
+    async def write_speaker(self, pcm24k: bytes) -> None:
+        pcm = np.frombuffer(pcm24k, dtype=np.int16)
+        up  = np.repeat(pcm, 2)  # 24000 → 48000
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._out_stream.write, up.tobytes())
+
+
+class _SpeakerTrack:
+    """aiortc に渡す AudioStreamTrack — RealtimeDialogue の出力を WebRTC ピアへ送る。"""
+    kind = "audio"
+    SAMPLE_RATE      = 24000
+    SAMPLES_PER_FRAME = 480  # 20ms @ 24kHz
+
+    def __init__(self, queue: asyncio.Queue):
+        try:
+            from aiortc.mediastreams import AudioStreamTrack
+            super_class = AudioStreamTrack
+        except ImportError:
+            super_class = object
+        # 動的継承（aiortc が未インストールの場合でも定義を通す）
+        self.__class__ = type("_SpeakerTrack", (super_class,), dict(self.__class__.__dict__))
+        if hasattr(super_class, "__init__"):
+            super_class.__init__(self)  # type: ignore[arg-type]
+        self._queue = queue
+        self._pts   = 0
+        self._buf   = bytearray()
+
+    async def recv(self):
+        import av
+        needed = self.SAMPLES_PER_FRAME * 2  # 16bit = 2 bytes/sample
+        while len(self._buf) < needed:
+            chunk = await self._queue.get()
+            self._buf.extend(chunk)
+        frame_bytes   = bytes(self._buf[:needed])
+        self._buf     = self._buf[needed:]
+        samples = np.frombuffer(frame_bytes, dtype=np.int16)
+        frame   = av.AudioFrame.from_ndarray(samples.reshape(1, -1), format="s16", layout="mono")
+        frame.sample_rate = self.SAMPLE_RATE
+        frame.pts         = self._pts
+        frame.time_base   = fractions.Fraction(1, self.SAMPLE_RATE)
+        self._pts        += self.SAMPLES_PER_FRAME
+        return frame
+
+
+class WebRTCAudioBackend(AudioBackend):
+    """aiortc + aiohttp を使った WebRTC バックエンド（Phase 6.2 仮実装）。
+
+    起動後 http://<host>:<port>/offer に SDP offer を POST すると接続を確立する。
+    ピアの音声を受信してマイク入力として扱い、TTS 音声をピアへ送信する。
+
+    依存: pip install aiortc aiohttp av
+    """
+
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
+        self._host = host
+        self._port = port
+        self._mic_queue: asyncio.Queue     = asyncio.Queue()
+        self._speaker_queue: asyncio.Queue = asyncio.Queue()
+        self._pc   = None
+        self._runner = None
+
+    async def start(self) -> None:
+        try:
+            from aiohttp import web
+        except ImportError:
+            raise RuntimeError("WebRTC バックエンドには aiohttp が必要です: pip install aiohttp")
+        try:
+            import aiortc  # noqa: F401
+        except ImportError:
+            raise RuntimeError("WebRTC バックエンドには aiortc が必要です: pip install aiortc av")
+
+        from aiohttp import web
+        app = web.Application()
+        app.router.add_post("/offer", self._handle_offer)
+        app.router.add_get("/",       self._handle_index)
+        self._runner = web.AppRunner(app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self._host, self._port)
+        await site.start()
+        print(f"[WebRTC] シグナリングサーバー: http://{self._host}:{self._port}/offer")
+        print("[WebRTC] ピアからの SDP offer を待機中...")
+
+    async def _handle_index(self, request):
+        from aiohttp import web
+        return web.Response(text="WebRTC audio bridge running. POST /offer with SDP.")
+
+    async def _handle_offer(self, request):
+        from aiohttp import web
+        from aiortc import RTCPeerConnection, RTCSessionDescription
+
+        params = await request.json()
+        offer  = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+        pc = RTCPeerConnection()
+        self._pc = pc
+
+        # ロボット音声 → ピアへ送信するトラック
+        speaker_track = _SpeakerTrack(self._speaker_queue)
+        pc.addTrack(speaker_track)
+
+        @pc.on("track")
+        def on_track(track):
+            if track.kind == "audio":
+                print("[WebRTC] 音声トラック受信")
+                asyncio.ensure_future(self._receive_audio(track))
+
+        @pc.on("connectionstatechange")
+        async def on_state():
+            print(f"[WebRTC] 接続状態: {pc.connectionState}")
+            if pc.connectionState in ("failed", "closed"):
+                await pc.close()
+
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps({
+                "sdp":  pc.localDescription.sdp,
+                "type": pc.localDescription.type,
+            }),
+        )
+
+    async def _receive_audio(self, track) -> None:
+        """ピアからの音声フレームを PCM16 24kHz に変換してキューへ積む。"""
+        while True:
+            try:
+                frame = await track.recv()
+                # aiortc の AudioFrame は av.AudioFrame — s16 / 48kHz が多い
+                import av
+                resampled = frame.to_ndarray(format="s16")
+                # ステレオ → モノラル
+                if resampled.shape[0] > 1:
+                    resampled = resampled.mean(axis=0, keepdims=True).astype(np.int16)
+                pcm = resampled.flatten()
+                # 48kHz → 24kHz（単純デシメーション）
+                if frame.sample_rate == 48000:
+                    pcm = pcm[::2]
+                await self._mic_queue.put(pcm.tobytes())
+            except Exception:
+                break
+
+    async def read_mic(self) -> bytes:
+        return await self._mic_queue.get()
+
+    async def write_speaker(self, pcm24k: bytes) -> None:
+        await self._speaker_queue.put(pcm24k)
+
+    async def stop(self) -> None:
+        if self._pc:
+            await self._pc.close()
+        if self._runner:
+            await self._runner.cleanup()
+
+
 # ── Realtime API ──────────────────────────────────────────────
 
 class RealtimeDialogue:
@@ -1049,8 +1307,7 @@ class RealtimeDialogue:
         navigator: Optional["GridNavigator"] = None,
         camera: Optional["CameraFrameSubscriber"] = None,
         vad: bool = True,
-        mic_device=None,
-        out_device=None,
+        audio_backend: Optional[AudioBackend] = None,
     ):
         self.motions   = motions
         self.player    = player
@@ -1058,8 +1315,7 @@ class RealtimeDialogue:
         self.navigator = navigator
         self.camera    = camera
         self.vad       = vad
-        self.mic_device = _normalize_device_selector(mic_device)
-        self.out_device = _normalize_device_selector(out_device)
+        self._audio    = audio_backend or PyAudioBackend()
         self._ws      = None
         self._abuf    = bytearray()
         self._nav_lock         = threading.Lock()
@@ -1405,87 +1661,24 @@ class RealtimeDialogue:
             await self._ws.send(json.dumps(msg))
 
     async def stream_mic(self):
-        import pyaudio
-        loop = asyncio.get_event_loop()
-        q: asyncio.Queue = asyncio.Queue()
-
-        # PipeWire を再起動して音声デバイスを再認識
-        if _restart_pipewire_services_if_available():
-            await asyncio.sleep(3)
-
-        pa = pyaudio.PyAudio()
-        dev_index = resolve_audio_device(pa, self.mic_device, is_input=True, purpose="マイク")
-        if dev_index is None:
-            pa.terminate()
-            raise RuntimeError("[マイク] 入力デバイスが見つかりません")
-        info = pa.get_device_info_by_index(dev_index)
-        print(f"[マイク] {info['name']} device={dev_index}, 48000Hz → 24000Hz")
-
-        def cb(in_data, frame_count, time_info, status):
-            pcm = np.frombuffer(in_data, dtype=np.int16)
-            down = pcm[::2]  # 48000 → 24000
-            loop.call_soon_threadsafe(q.put_nowait, down.tobytes())
-            return (None, pyaudio.paContinue)
-
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=48000,
-            input=True,
-            input_device_index=dev_index,
-            frames_per_buffer=2048,
-            stream_callback=cb,
-        )
-        stream.start_stream()
-        try:
-            while True:
-                pcm = await q.get()
-                if time.monotonic() < self._speaking_until:
-                    continue  # Phase 5.1: TTS再生中はマイクをゲート（エコーキャンセル）
-                await self._send({
-                    "type": "input_audio_buffer.append",
-                    "audio": base64.b64encode(pcm).decode(),
-                })
-        finally:
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
+        while True:
+            pcm = await self._audio.read_mic()
+            if time.monotonic() < self._speaking_until:
+                continue  # Phase 5.1: TTS再生中はマイクをゲート（エコーキャンセル）
+            await self._send({
+                "type": "input_audio_buffer.append",
+                "audio": base64.b64encode(pcm).decode(),
+            })
 
     async def play_audio(self):
-        import pyaudio
-        pa = pyaudio.PyAudio()
-
-        out_index = resolve_audio_device(pa, self.out_device, is_input=False, purpose="スピーカー")
-        if out_index is None:
-            pa.terminate()
-            raise RuntimeError("[スピーカー] 出力デバイスが見つかりません")
-        info = pa.get_device_info_by_index(out_index)
-        print(f"[スピーカー] {info['name']} device={out_index}, 48000Hz")
-
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=48000,
-            output=True,
-            output_device_index=out_index,
-            frames_per_buffer=4096,
-        )
-        stream.start_stream()
-        try:
-            while True:
-                if self._abuf:
-                    chunk = bytes(self._abuf[:4096])
-                    self._abuf = self._abuf[4096:]
-                    pcm = np.frombuffer(chunk, dtype=np.int16)
-                    up = np.repeat(pcm, 2)  # 24000 → 48000
-                    stream.write(up.tobytes())
-                    self._speaking_until = time.monotonic() + ECHO_GATE_COOLDOWN_S  # Phase 5.1
-                else:
-                    await asyncio.sleep(0.01)
-        finally:
-            stream.stop_stream()
-            stream.close()
-            pa.terminate()
+        while True:
+            if self._abuf:
+                chunk = bytes(self._abuf[:4096])
+                self._abuf = self._abuf[4096:]
+                await self._audio.write_speaker(chunk)
+                self._speaking_until = time.monotonic() + ECHO_GATE_COOLDOWN_S  # Phase 5.1
+            else:
+                await asyncio.sleep(0.01)
 
     async def recv_loop(self):
         async for raw in self._ws:
@@ -1679,7 +1872,8 @@ class RealtimeDialogue:
         import pyaudio, keyboard
         pa = pyaudio.PyAudio()
 
-        dev_index = resolve_audio_device(pa, self.mic_device, is_input=True, purpose="マイク")
+        mic_sel = self._audio._mic_device if isinstance(self._audio, PyAudioBackend) else None
+        dev_index = resolve_audio_device(pa, mic_sel, is_input=True, purpose="マイク")
         if dev_index is None:
             pa.terminate()
             raise RuntimeError("[マイク] 入力デバイスが見つかりません")
@@ -1718,20 +1912,24 @@ class RealtimeDialogue:
                 await self._send({"type": "response.create"})
 
     async def run(self):
-        await self.connect()
-        self._running = True
-        asyncio.create_task(self._background_scene_monitor())  # Phase 7.1
+        await self._audio.start()          # Phase 6.2: バックエンド起動
         try:
-            if self.vad:
-                await asyncio.gather(
-                    self.stream_mic(), self.recv_loop(), self.play_audio()
-                )
-            else:
-                await asyncio.gather(
-                    self.ptt_loop(), self.recv_loop(), self.play_audio()
-                )
+            await self.connect()
+            self._running = True
+            asyncio.create_task(self._background_scene_monitor())  # Phase 7.1
+            try:
+                if self.vad:
+                    await asyncio.gather(
+                        self.stream_mic(), self.recv_loop(), self.play_audio()
+                    )
+                else:
+                    await asyncio.gather(
+                        self.ptt_loop(), self.recv_loop(), self.play_audio()
+                    )
+            finally:
+                self._running = False
         finally:
-            self._running = False
+            await self._audio.stop()       # Phase 6.2: バックエンド停止
 
 
 # ── エントリポイント ──────────────────────────────────────────
@@ -1755,6 +1953,10 @@ def main():
                    help="カメラ映像 ZMQ ポート (デフォルト: 5555)")
     p.add_argument("--no-camera",   action="store_true",
                    help="カメラキャプチャを無効化")
+    p.add_argument("--webrtc",      action="store_true",
+                   help="WebRTC 音声バックエンドを使用（Phase 6.2）")
+    p.add_argument("--webrtc-port", type=int, default=8080,
+                   help="WebRTC シグナリングサーバーのポート (デフォルト: 8080)")
     args = p.parse_args()
 
     if args.list_audio_devices:
@@ -1797,9 +1999,18 @@ def main():
         )
         camera.start()
 
+    # Phase 6.2: 音声バックエンド選択
+    if args.webrtc:
+        audio_backend: AudioBackend = WebRTCAudioBackend(port=args.webrtc_port)
+        print(f"[Audio] WebRTC バックエンド (port={args.webrtc_port})")
+    else:
+        audio_backend = PyAudioBackend(mic_device=MIC_DEVICE_ID, out_device=OUT_DEVICE_ID)
+        print("[Audio] PyAudio バックエンド")
+
     kb = KeyboardController(walker, player)
     kb.start()
-    print(f"✅ 起動完了  モード: {'PTT' if args.ptt else 'VAD'}  動作数: {len(motions)}")
+    mode_str = "WebRTC" if args.webrtc else ("PTT" if args.ptt else "VAD")
+    print(f"✅ 起動完了  モード: {mode_str}  動作数: {len(motions)}")
     print("⚠️  手動制御: W=前進 S=後退 A=左旋回 D=右旋回 Space=停止\n")
 
     try:
@@ -1811,8 +2022,7 @@ def main():
                 navigator=navigator,
                 camera=camera,
                 vad=not args.ptt,
-                mic_device=MIC_DEVICE_ID,
-                out_device=OUT_DEVICE_ID,
+                audio_backend=audio_backend,
             ).run()
         )
     except KeyboardInterrupt:
