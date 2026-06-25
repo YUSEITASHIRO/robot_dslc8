@@ -33,6 +33,25 @@ except ImportError:
 GEAR_SONIC_ROOT = Path(os.path.abspath(__file__)).parent.parent.parent.parent
 
 
+def _detect_wsl():
+    """WSL 上で実行されているかを判定する。
+
+    WSL では GPU 描画が d3d12 半仮想化層を経由して非常に重く、制御ループや
+    マウス操作に影響する。そのため WSL のときだけ各種パフォーマンス最適化を
+    既定で有効にし、ネイティブ Linux では元の挙動（画質そのまま）を維持する。
+    """
+    try:
+        if os.path.exists("/dev/dxg"):
+            return True
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except Exception:
+        return False
+
+
+_IS_WSL = _detect_wsl()
+
+
 class DefaultEnv:
     """Base environment class that handles simulation environment setup and step"""
 
@@ -69,9 +88,30 @@ class DefaultEnv:
         self._viewer_last_t  = 0.0
 
         self.offscreen = offscreen
-        if self.offscreen:
+        self._enable_image_publish = enable_image_publish
+        # 離屏レンダリングを制御ループから切り離すためのレンダースレッド用ステート。
+        # _render_lock は mj_step とレンダー用スナップショットを排他する（保持は数μs）。
+        self._render_lock = Lock()
+        self._render_stop = Event()
+        self._render_thread = None
+        # 離屏レンダリングを別スレッドへ分離するか。既定は全プラットフォームで有効。
+        # これは「同期レンダリングが制御ループ(200Hz)を塞ぐ」という通信レート低下バグの
+        # 本質的な修正であり、出力画像は一切変わらない（透過的なリアルタイム性改善）。
+        # 描画が遅くなる状況は WSL(d3d12) に限らず、Linux サーバの
+        # ヘッドレス/リモート/ソフトウェア(osmesa,llvmpipe)レンダリングでも起きるため、
+        # プラットフォームで門限せず常に分離する。GPU が速い環境ではオーバーヘッドは無視できる。
+        # SIM_RENDER_THREAD=0 で元の同期パスに戻せる。
+        self._use_render_thread = (
+            enable_image_publish
+            and bool(self.camera_configs)
+            and os.environ.get("SIM_RENDER_THREAD", "1") == "1"
+        )
+        if self.offscreen and not self._use_render_thread:
+            # 同期レンダリングパス（publishなし、または Linux 既定）は self.renderers を使う
             self.init_renderers()
-        self.image_dt = self.config.get("IMAGE_DT", 0.033333)
+        # 離屏レンダリング周期。SIM_IMAGE_DT で上書き可（大きくすると離屏fpsが下がり、
+        # ウィンドウ側に GPU が回ってマウス操作が滑らかになる。例: SIM_IMAGE_DT=0.1 → 10Hz）。
+        self.image_dt = float(os.environ.get("SIM_IMAGE_DT", self.config.get("IMAGE_DT", 0.033333)))
         self.image_publish_process = None
 
     def start_image_publish_subprocess(self, start_method: str = "spawn", camera_port: int = 5555):
@@ -91,6 +131,8 @@ class DefaultEnv:
             verbose=self.config.get("verbose", False),
         )
         self.image_publish_process.start_process()
+        # 離屏レンダリングを専用スレッドへ。制御ループ(200Hz)を render() で塞がないため。
+        self.start_render_thread()
 
     def _get_dof_indices_by_class(self):
         with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".xml") as f:
@@ -154,6 +196,7 @@ class DefaultEnv:
         self.mj_model = mujoco.MjModel.from_xml_path(xml_path)
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mj_model.opt.timestep = self.sim_dt
+        self._apply_fast_visuals()
         self.torso_index = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
         self.root_body = "pelvis"
         self.root_body_id = self.mj_model.body(self.root_body).id
@@ -307,12 +350,58 @@ class DefaultEnv:
         self.left_hand_index = np.array(self.left_hand_index)
         self.right_hand_index = np.array(self.right_hand_index)
 
+    def _apply_fast_visuals(self):
+        """オンスクリーンの操作性（特にマウスでの視点操作）を滑らかにするため、
+        モデルレベルで重い描画機能を無効化する。
+
+        WSL の d3d12 では影(4K shadowmap)＋反射が描画の約2/3を占め、ウィンドウが ~8fps
+        に落ちてマウス操作がカクつく。これらを切ると ~21fps まで上がる。
+        scene flag は viewer が毎フレーム再構築する際にリセットされるため、ここでは
+        モデルレベル(light_castshadow / mat_reflectance)で無効化する（リセットされない）。
+
+        既定は WSL のときだけ fast（影・反射オフ）。ネイティブ Linux では full（元の画質）。
+        SIM_VIEWER_QUALITY=fast/full でプラットフォームに関係なく強制できる。
+        SIM_DISABLE_MSAA=1 で追加でアンチエイリアス(MSAA)も無効化（さらに少し軽くなる）。
+        """
+        if os.environ.get("SIM_VIEWER_QUALITY", "fast" if _IS_WSL else "full") == "full":
+            return
+        try:
+            if self.mj_model.nlight > 0:
+                self.mj_model.light_castshadow[:] = 0          # 影パスを無効化（最大の負荷）
+            if self.mj_model.nmat > 0:
+                self.mj_model.mat_reflectance[:] = 0           # 反射パスを無効化
+            if os.environ.get("SIM_DISABLE_MSAA", "0") == "1":
+                self.mj_model.vis.quality.offsamples = 0       # MSAA 無効
+            print("[viewer] fast visuals: shadow/reflection disabled "
+                  "(SIM_VIEWER_QUALITY=full で戻せる)")
+        except Exception as e:
+            print(f"[viewer] _apply_fast_visuals skipped: {e}")
+
+    def _apply_offscreen_render_flags(self, renderer):
+        """離屏カメラの描画品質を調整する。
+
+        WSL の d3d12 では影(SHADOW)と反射(REFLECTION)のパスが非常に高コスト
+        （合計 ~85ms/frame、全体の約2/3）。ロボットの知覚・対話用カメラには不要なので
+        既定で無効化し、8fps → ~21fps に引き上げる。
+        離屏カメラは gear-sonic に渡す「機能的な知覚画像」であり、影・反射は不要。
+        そこで全プラットフォームで既定オフにする（描画が軽くなり、WSL に限らず
+        Linux のヘッドレス/リモート/ソフトウェアレンダリング環境でもカメラ Hz が上がる）。
+        ウィンドウ(人間が見る)の画質には影響しない（別 Renderer のため）。
+        SIM_OFFSCREEN_QUALITY=full で従来通り（影・反射あり）に戻せる。
+        """
+        if os.environ.get("SIM_OFFSCREEN_QUALITY", "fast") == "full":
+            return
+        F = mujoco.mjtRndFlag
+        renderer.scene.flags[int(F.mjRND_SHADOW)] = 0
+        renderer.scene.flags[int(F.mjRND_REFLECTION)] = 0
+
     def init_renderers(self):
         self.renderers = {}
         for camera_name, camera_config in self.camera_configs.items():
             renderer = mujoco.Renderer(
                 self.mj_model, height=camera_config["height"], width=camera_config["width"]
             )
+            self._apply_offscreen_render_flags(renderer)
             self.renderers[camera_name] = renderer
 
     def compute_body_torques(self) -> np.ndarray:
@@ -487,7 +576,9 @@ class DefaultEnv:
             self.mj_data.ctrl = np.concatenate((np.zeros(6), self.torques))
         else:
             self.mj_data.ctrl = self.torques
-        mujoco.mj_step(self.mj_model, self.mj_data)
+        # レンダースレッドが mj_data をスナップショットする瞬間と排他（保持は数μs）。
+        with self._render_lock:
+            mujoco.mj_step(self.mj_model, self.mj_data)
 
         self.check_fall()
 
@@ -639,7 +730,111 @@ class DefaultEnv:
         if self.image_publish_process is not None:
             self.image_publish_process.update_shared_memory(render_caches)
         return render_caches
-        return render_caches
+
+    # ------------------------------------------------------------------
+    # 離屏レンダリングを制御ループから切り離す専用スレッド
+    # ------------------------------------------------------------------
+    def start_render_thread(self):
+        """制御ループとは別スレッドで離屏カメラをレンダリングする。
+
+        GL コンテキストはスレッド固有なので、renderer はこのスレッド内で生成する。
+        制御スレッドは mj_data のスナップショット中だけロックを取る（数μs）ので、
+        重い render()+読み戻し(glReadPixels) は制御の 200Hz ループを一切塞がない。
+        """
+        if self._render_thread is not None:
+            return
+        if not self._use_render_thread:
+            # 同期パス（Linux 既定 or SIM_RENDER_THREAD=0）。self.renderers は __init__ で生成済み。
+            print("[render-thread] disabled (synchronous render in control loop)")
+            return
+        self._render_stop.clear()
+        self._render_thread = Thread(target=self._render_loop, name="offscreen-render", daemon=True)
+        self._render_thread.start()
+
+    def stop_render_thread(self):
+        if self._render_thread is None:
+            return
+        self._render_stop.set()
+        self._render_thread.join(timeout=5)
+        self._render_thread = None
+
+    def _render_snapshot(self, render_data):
+        """ライブ mj_data の動的状態をロック下で render_data へコピーし、mj_forward で派生量を再計算。
+
+        ロックを握るのはコピーの一瞬だけ。mj_forward（軽い）と render（重い）はロック外で実行する。
+        """
+        with self._render_lock:
+            render_data.qpos[:] = self.mj_data.qpos
+            render_data.qvel[:] = self.mj_data.qvel
+            render_data.ctrl[:] = self.mj_data.ctrl
+            render_data.time = self.mj_data.time
+            if self.mj_model.nmocap > 0:
+                render_data.mocap_pos[:] = self.mj_data.mocap_pos
+                render_data.mocap_quat[:] = self.mj_data.mocap_quat
+            if self.mj_model.na > 0:
+                render_data.act[:] = self.mj_data.act
+            render_data.xfrc_applied[:] = self.mj_data.xfrc_applied
+        # ロック外: 派生量（xpos/cam_xpos 等）を再計算。制御スレッドには影響しない。
+        mujoco.mj_forward(self.mj_model, render_data)
+
+    def _render_loop(self):
+        try:
+            renderers = {}
+            for camera_name, camera_config in self.camera_configs.items():
+                renderer = mujoco.Renderer(
+                    self.mj_model,
+                    height=camera_config["height"],
+                    width=camera_config["width"],
+                )
+                self._apply_offscreen_render_flags(renderer)
+                renderers[camera_name] = renderer
+        except Exception as e:
+            print(f"[render-thread] failed to init renderers: {e}")
+            self._render_thread = None
+            return
+
+        render_data = mujoco.MjData(self.mj_model)
+        print(f"[render-thread] started ({len(renderers)} cam, image_dt={self.image_dt})")
+
+        while not self._render_stop.is_set():
+            t0 = time.monotonic()
+            try:
+                self._render_snapshot(render_data)
+
+                active = getattr(self, "_active_stream", None)
+                target = {active: self.camera_configs[active]} if (
+                    active and active in self.camera_configs
+                ) else self.camera_configs
+
+                render_caches = {}
+                for camera_name, camera_config in target.items():
+                    renderer = renderers[camera_name]
+                    if "params" in camera_config:
+                        renderer.update_scene(render_data, camera=camera_config["params"])
+                    else:
+                        renderer.update_scene(render_data, camera=camera_name)
+                    render_caches[camera_name + "_image"] = renderer.render()
+
+                if self.image_publish_process is not None:
+                    if _check_visibility is not None:
+                        self.image_publish_process._robot_vis_arr[0] = (
+                            1 if _check_visibility(self.mj_model, render_data) else 0
+                        )
+                    self.image_publish_process.update_shared_memory(render_caches)
+            except Exception as e:
+                print(f"[render-thread] render error: {e}")
+
+            # image_dt 周期を維持（render が遅くても制御ループとは無関係）
+            sleep_t = self.image_dt - (time.monotonic() - t0)
+            if sleep_t > 0:
+                self._render_stop.wait(sleep_t)
+
+        for r in renderers.values():
+            try:
+                r.close()
+            except Exception:
+                pass
+        print("[render-thread] stopped")
 
     def handle_keyboard_button(self, key):
         if self.elastic_band:
@@ -747,6 +942,11 @@ class BaseSimulator:
         sim_cnt = 0
         ts = time.time()
 
+        # 制御ループの実効周波数ログ（リアルタイム性の診断用）。SIM_LOG_HZ=1 で有効。
+        _log_hz = os.environ.get("SIM_LOG_HZ", "0") == "1"
+        _hz_t0 = time.monotonic()
+        _hz_n0 = 0
+
         try:
             while self._running and (
                 (self.sim_env.viewer and self.sim_env.viewer.is_running())
@@ -768,7 +968,11 @@ class BaseSimulator:
                 if sim_cnt % int(self.reward_dt / self.sim_dt) == 0:
                     self.sim_env.update_reward()
 
-                if self.sim_env.offscreen and sim_cnt % int(self.image_dt / self.sim_dt) == 0:
+                # レンダースレッドが動いている場合、制御ループ側では一切レンダリングしない
+                # （render() は別スレッドに分離済み。ここで呼ぶと 200Hz 制御を塞ぐ）。
+                if (self.sim_env._render_thread is None
+                        and self.sim_env.offscreen
+                        and sim_cnt % int(self.image_dt / self.sim_dt) == 0):
                     caches = self.sim_env.update_render_caches()
                     # robot_visibility は常に計算（active_stream に関係なく）
                     if _check_visibility is not None and self.sim_env.image_publish_process is not None:
@@ -781,6 +985,15 @@ class BaseSimulator:
                     time.sleep(sleep_time)
 
                 sim_cnt += 1
+
+                if _log_hz:
+                    _dt = time.monotonic() - _hz_t0
+                    if _dt >= 2.0:
+                        hz = (sim_cnt - _hz_n0) / _dt
+                        print(f"[ctrl-loop] {hz:.1f} Hz (target {1.0/self.sim_dt:.0f} Hz, "
+                              f"RTF {hz*self.sim_dt:.2f})")
+                        _hz_t0 = time.monotonic()
+                        _hz_n0 = sim_cnt
         except KeyboardInterrupt:
             print("Simulator interrupted by user.")
         finally:
@@ -795,6 +1008,8 @@ class BaseSimulator:
     def close(self):
         self._running = False
         try:
+            # 共有メモリを unlink する前に、まずレンダースレッドの書き込みを止める
+            self.sim_env.stop_render_thread()
             if self.sim_env.image_publish_process is not None:
                 self.sim_env.image_publish_process.stop()
             if self.sim_env.viewer is not None:

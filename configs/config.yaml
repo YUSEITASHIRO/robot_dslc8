@@ -19,10 +19,17 @@ audio:
   mic_device: "pulse"    # PipeWire/Pulse デバイス名
   out_device: "Jabra"    # スピーカーデバイス名
 
+vision:
+  enabled: false
+  camera_zmq: "tcp://localhost:5555"
+  camera: "ego_view"
+  detail: "low"  # low / auto / high
+  max_staleness_sec: 2.0
+
 bones:
   root: "data/g1/csv"
   play_fps: 120
 
 paths:
-  gr00t_root: "../extern/GR00T-WholeBodyControl"
-  deploy_root: "../extern/GR00T-WholeBodyControl/gear_sonic_deploy"
+  gr00t_root: "../extern/GRooT-WholeBodyControl"
+  deploy_root: "../extern/GRooT-WholeBodyControl/gear_sonic_deploy"
