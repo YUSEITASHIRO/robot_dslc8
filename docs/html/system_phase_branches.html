@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1280px; height:720px;
+  background:#595959;
+  display:flex; align-items:center; justify-content:center;
+  font-family:"Yu Gothic","Meiryo","Hiragino Kaku Gothic ProN",sans-serif;
+}
+.slide {
+  width:1200px; height:675px;
+  background:#ffffff;
+  position:relative; overflow:hidden;
+}
+h1 { position:absolute; top:16px; left:24px; font-size:20px; font-weight:600; color:#1a1a1a; }
+footer {
+  position:absolute; bottom:8px; width:100%; text-align:center;
+  font-size:10px; color:#888;
+}
+.page { position:absolute; bottom:6px; right:16px; font-size:15px; font-weight:bold; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <h1>フェーズ別実装マップ（ブランチ構成・変更ファイル）</h1>
+  <svg width="1160" height="618" style="position:absolute;top:46px;left:20px" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a"  markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#404040"/></marker>
+      <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e7d32"/></marker>
+      <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#1565c0"/></marker>
+    </defs>
+
+    <!-- ==========================================
+         COLUMN HEADERS
+         ========================================== -->
+    <!-- Col 1: Branch -->
+    <rect x="0" y="0" width="220" height="26" fill="#37474f" rx="2"/>
+    <text x="110" y="18" font-size="12" font-weight="bold" fill="white" text-anchor="middle">ブランチ</text>
+    <!-- Col 2: Phase -->
+    <rect x="222" y="0" width="100" height="26" fill="#37474f" rx="2"/>
+    <text x="272" y="18" font-size="12" font-weight="bold" fill="white" text-anchor="middle">Phase</text>
+    <!-- Col 3: 内容 -->
+    <rect x="324" y="0" width="380" height="26" fill="#37474f" rx="2"/>
+    <text x="514" y="18" font-size="12" font-weight="bold" fill="white" text-anchor="middle">主な実装内容</text>
+    <!-- Col 4: 変更ファイル -->
+    <rect x="706" y="0" width="454" height="26" fill="#37474f" rx="2"/>
+    <text x="933" y="18" font-size="12" font-weight="bold" fill="white" text-anchor="middle">変更・追加ファイル</text>
+
+    <!-- ==========================================
+         main (base)
+         ========================================== -->
+    <!-- Row: main -->
+    <rect x="0" y="30" width="220" height="36" fill="#263238" rx="2"/>
+    <text x="110" y="50" font-size="12" font-weight="bold" fill="white" text-anchor="middle">main</text>
+    <text x="110" y="62" font-size="9" fill="#90a4ae" text-anchor="middle">全フェーズ統合（保護済み）</text>
+    <rect x="222" y="30" width="100" height="36" fill="#eceff1" rx="2"/>
+    <text x="272" y="53" font-size="11" fill="#546e7a" text-anchor="middle">全統合</text>
+    <rect x="324" y="30" width="836" height="36" fill="#eceff1" rx="2"/>
+    <text x="514" y="50" font-size="11" fill="#333" text-anchor="start" x="332">PR マージ経由で全フェーズを取り込んだ安定版ブランチ</text>
+    <text x="332" y="63" font-size="10" fill="#888">★ ペルソナ詳細（清水店長・湯川部長）を SYSTEM_PROMPT / README / How-to に反映 (2026-06-26)</text>
+
+    <!-- Vertical trunk line -->
+    <line x1="110" y1="66" x2="110" y2="608" stroke="#546e7a" stroke-width="2" stroke-dasharray="6,3"/>
+
+    <!-- ==========================================
+         ROW 1: feat/phase1-navigation  y=78..136
+         ========================================== -->
+    <!-- branch connector -->
+    <line x1="110" y1="102" x2="8" y2="102" stroke="#1565c0" stroke-width="1.5" marker-end="url(#ab)"/>
+    <rect x="0" y="78" width="220" height="58" fill="#e3f2fd" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="110" y="98" font-size="11" font-weight="bold" fill="#1565c0" text-anchor="middle">feat/phase1-navigation</text>
+    <text x="110" y="113" font-size="9" fill="#555" text-anchor="middle">Phase 1/2/3 実装</text>
+    <rect x="6" y="118" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="129" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="78" width="100" height="58" fill="#e3f2fd" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="272" y="102" font-size="12" fill="#1565c0" text-anchor="middle" font-weight="bold">1.1 / 2 / 3</text>
+
+    <rect x="324" y="78" width="380" height="58" fill="#f8f9ff" stroke="#c5cae9" stroke-width="1" rx="3"/>
+    <text x="332" y="98" font-size="10" fill="#333">• GridNavigator: _xi/_yi でセル座標管理 + navigate_to FC</text>
+    <text x="332" y="113" font-size="10" fill="#333">• point_at: ロボット位置×向きから指さし方向を動的計算</text>
+    <text x="332" y="128" font-size="10" fill="#333">• CameraFrameSubscriber + look_around / バックチャネル相づち</text>
+
+    <rect x="706" y="78" width="454" height="58" fill="#f8f9ff" stroke="#c5cae9" stroke-width="1" rx="3"/>
+    <text x="714" y="98" font-size="10" fill="#333" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="714" y="113" font-size="9" fill="#888">GridNavigator, CameraFrameSubscriber, navigate_to, point_at, look_around</text>
+    <text x="714" y="128" font-size="9" fill="#888">perform_motion, backchannel nod (speech_started +1.5s)</text>
+
+    <!-- ==========================================
+         ROW 2: feat/phase4-quality  y=140..198
+         ========================================== -->
+    <line x1="110" y1="162" x2="8" y2="162" stroke="#7b1fa2" stroke-width="1.5" marker-end="url(#a)"/>
+    <rect x="0" y="140" width="220" height="58" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1" rx="3"/>
+    <text x="110" y="160" font-size="11" font-weight="bold" fill="#7b1fa2" text-anchor="middle">feat/phase4-quality</text>
+    <text x="110" y="175" font-size="9" fill="#555" text-anchor="middle">Phase 4 品質・安定性</text>
+    <rect x="6" y="180" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="191" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="140" width="100" height="58" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1" rx="3"/>
+    <text x="272" y="164" font-size="12" fill="#7b1fa2" text-anchor="middle" font-weight="bold">4.1 / 4.2 / 4.3</text>
+
+    <rect x="324" y="140" width="380" height="58" fill="#fdf8ff" stroke="#e1bee7" stroke-width="1" rx="3"/>
+    <text x="332" y="160" font-size="10" fill="#333">• navigate_to タイムアウト watchdog (60s 強制停止)</text>
+    <text x="332" y="175" font-size="10" fill="#333">• VAD パラメータ定数化・TURN 値を運営推奨値に統一</text>
+    <text x="332" y="190" font-size="10" fill="#333">• WSL 安定化・CameraFrameSubscriber 移行・Windows 互換</text>
+
+    <rect x="706" y="140" width="454" height="58" fill="#fdf8ff" stroke="#e1bee7" stroke-width="1" rx="3"/>
+    <text x="714" y="160" font-size="10" fill="#333" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="714" y="175" font-size="10" fill="#333" font-family="monospace">scripts/core/run_dialogue.sh</text>
+    <text x="714" y="190" font-size="9" fill="#888">VAD定数 TURN_DETECTION_*, watchdog thread, conda/venv 環境検出</text>
+
+    <!-- ==========================================
+         ROW 3: feat/phase5-enhancement  y=202..260
+         ========================================== -->
+    <line x1="110" y1="224" x2="8" y2="224" stroke="#e65100" stroke-width="1.5" marker-end="url(#a)"/>
+    <rect x="0" y="202" width="220" height="58" fill="#fff3e0" stroke="#e65100" stroke-width="1" rx="3"/>
+    <text x="110" y="222" font-size="11" font-weight="bold" fill="#e65100" text-anchor="middle">feat/phase5-enhancement</text>
+    <text x="110" y="237" font-size="9" fill="#555" text-anchor="middle">Phase 5 エコーキャンセル+キャッシュ</text>
+    <rect x="6" y="242" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="253" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="202" width="100" height="58" fill="#fff3e0" stroke="#e65100" stroke-width="1" rx="3"/>
+    <text x="272" y="226" font-size="12" fill="#e65100" text-anchor="middle" font-weight="bold">5.1 / 5.2</text>
+
+    <rect x="324" y="202" width="380" height="58" fill="#fffbf0" stroke="#ffe082" stroke-width="1" rx="3"/>
+    <text x="332" y="222" font-size="10" fill="#333">• エコーキャンセル: TTS 再生中マイクを遮断 +400ms クールダウン</text>
+    <text x="332" y="237" font-size="10" fill="#333">• シーンキャッシュ TTL:30s + 接続後 3s 自動スキャン</text>
+    <text x="332" y="252" font-size="10" fill="#333">• look_around 結果を再利用（重複 Vision API 呼び出し削減）</text>
+
+    <rect x="706" y="202" width="454" height="58" fill="#fffbf0" stroke="#ffe082" stroke-width="1" rx="3"/>
+    <text x="714" y="222" font-size="10" fill="#333" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="714" y="237" font-size="9" fill="#888">_is_speaking フラグ, _scene_cache dict, _SCENE_CACHE_TTL=30</text>
+    <text x="714" y="252" font-size="9" fill="#888">_auto_scan_scene() (asyncio.create_task, delay=3s)</text>
+
+    <!-- ==========================================
+         ROW 4: feat/phase6-strategy  y=264..322
+         ========================================== -->
+    <line x1="110" y1="286" x2="8" y2="286" stroke="#00695c" stroke-width="1.5" marker-end="url(#a)"/>
+    <rect x="0" y="264" width="220" height="58" fill="#e0f2f1" stroke="#00695c" stroke-width="1" rx="3"/>
+    <text x="110" y="284" font-size="11" font-weight="bold" fill="#00695c" text-anchor="middle">feat/phase6-strategy</text>
+    <text x="110" y="299" font-size="9" fill="#555" text-anchor="middle">Phase 6.1 + 7.1/7.2</text>
+    <rect x="6" y="304" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="315" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="264" width="100" height="58" fill="#e0f2f1" stroke="#00695c" stroke-width="1" rx="3"/>
+    <text x="272" y="285" font-size="11" fill="#00695c" text-anchor="middle" font-weight="bold">6.1 / 7.1</text>
+    <text x="272" y="301" font-size="11" fill="#00695c" text-anchor="middle" font-weight="bold">7.2</text>
+
+    <rect x="324" y="264" width="380" height="58" fill="#f0faf9" stroke="#b2dfdb" stroke-width="1" rx="3"/>
+    <text x="332" y="284" font-size="10" fill="#333">• 会話フェーズ追跡: GREETING→TOURING→NEGOTIATING→CLOSING</text>
+    <text x="332" y="299" font-size="10" fill="#333">• session.update で動的 instructions 切替</text>
+    <text x="332" y="314" font-size="10" fill="#333">• バックグラウンド Vision 監視 (25s) + 対話者位置追従ナビゲーション</text>
+
+    <rect x="706" y="264" width="454" height="58" fill="#f0faf9" stroke="#b2dfdb" stroke-width="1" rx="3"/>
+    <text x="714" y="284" font-size="10" fill="#333" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="714" y="299" font-size="9" fill="#888">ConversationPhase enum, _phase, _phase_instructions dict</text>
+    <text x="714" y="314" font-size="9" fill="#888">_background_scene_monitor() asyncio task, _user_moved_to_back()</text>
+
+    <!-- ==========================================
+         ROW 5: feat/phase6.2-webrtc  y=326..384
+         ========================================== -->
+    <line x1="110" y1="348" x2="8" y2="348" stroke="#1565c0" stroke-width="1.5" marker-end="url(#ab)"/>
+    <rect x="0" y="326" width="220" height="58" fill="#e3f2fd" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="110" y="346" font-size="11" font-weight="bold" fill="#1565c0" text-anchor="middle">feat/phase6.2-webrtc</text>
+    <text x="110" y="361" font-size="9" fill="#555" text-anchor="middle">Phase 6.2 WebRTC Backend</text>
+    <rect x="6" y="366" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="377" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="326" width="100" height="58" fill="#e3f2fd" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="272" y="355" font-size="12" fill="#1565c0" text-anchor="middle" font-weight="bold">6.2</text>
+
+    <rect x="324" y="326" width="380" height="58" fill="#f8faff" stroke="#c5cae9" stroke-width="1" rx="3"/>
+    <text x="332" y="346" font-size="10" fill="#333">• AudioBackend 抽象クラス + WebRTCAudioBackend 実装</text>
+    <text x="332" y="361" font-size="10" fill="#333">• aiortc + aiohttp による WebRTC 音声バックエンド</text>
+    <text x="332" y="376" font-size="10" fill="#333">• --webrtc フラグで既存の WebSocket と切替可能</text>
+
+    <rect x="706" y="326" width="454" height="58" fill="#f8faff" stroke="#c5cae9" stroke-width="1" rx="3"/>
+    <text x="714" y="346" font-size="10" fill="#333" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="714" y="361" font-size="9" fill="#888">AudioBackend ABC, WebRTCAudioBackend (aiortc), _SpeakerTrack</text>
+    <text x="714" y="376" font-size="9" fill="#888">argparse --webrtc フラグ</text>
+
+    <!-- ==========================================
+         ROW 6: feat/webui  y=388..446  ★NEW
+         ========================================== -->
+    <line x1="110" y1="410" x2="8" y2="410" stroke="#2e7d32" stroke-width="2" marker-end="url(#ag)"/>
+    <rect x="0" y="388" width="220" height="58" fill="#e8f5e9" stroke="#43a047" stroke-width="2" rx="3"/>
+    <text x="110" y="406" font-size="11" font-weight="bold" fill="#2e7d32" text-anchor="middle">★ feat/webui</text>
+    <text x="110" y="421" font-size="9" fill="#555" text-anchor="middle">Phase 8 WebUI ブリッジ</text>
+    <rect x="6" y="428" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="439" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+
+    <rect x="222" y="388" width="100" height="58" fill="#e8f5e9" stroke="#43a047" stroke-width="2" rx="3"/>
+    <text x="272" y="417" font-size="12" fill="#2e7d32" text-anchor="middle" font-weight="bold">★ 8</text>
+
+    <rect x="324" y="388" width="380" height="58" fill="#f1f8e9" stroke="#a5d6a7" stroke-width="1.5" rx="3"/>
+    <text x="332" y="408" font-size="10" fill="#333">• ★ bridge.py: aiohttp WebSocket サーバー (port:8765)</text>
+    <text x="332" y="423" font-size="10" fill="#333">• ★ connect_webui.sh: SSH tunnel + bridge.py 自動起動</text>
+    <text x="332" y="438" font-size="10" fill="#333">• ブラウザ WebUI から 🎤 接続 / 🔇 切断ボタンで対話制御</text>
+
+    <rect x="706" y="388" width="454" height="58" fill="#f1f8e9" stroke="#a5d6a7" stroke-width="1.5" rx="3"/>
+    <text x="714" y="408" font-size="10" fill="#2e7d32" font-family="monospace" font-weight="bold">★ src/bridge/bridge.py  (新規追加)</text>
+    <text x="714" y="423" font-size="10" fill="#2e7d32" font-family="monospace" font-weight="bold">★ scripts/core/connect_webui.sh  (新規追加)</text>
+    <text x="714" y="438" font-size="9" fill="#888">aiohttp, asyncio.subprocess, WebSocket 音声ストリーミング</text>
+
+    <!-- ==========================================
+         ROW 7: fix branches  y=450..530
+         ========================================== -->
+    <line x1="110" y1="490" x2="8" y2="490" stroke="#546e7a" stroke-width="1.5" marker-end="url(#a)"/>
+    <!-- fix/webrtc-speaker-track -->
+    <rect x="0" y="452" width="220" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="110" y="472" font-size="10" font-weight="bold" fill="#546e7a" text-anchor="middle">fix/webrtc-speaker-track</text>
+    <rect x="6" y="478" width="66" height="14" fill="#fff3e0" rx="7"/>
+    <text x="39" y="489" font-size="8" fill="#e65100" text-anchor="middle">🔲 PR レビュー中</text>
+    <rect x="222" y="452" width="100" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="272" y="474" font-size="10" fill="#546e7a" text-anchor="middle">Bug Fix</text>
+    <rect x="324" y="452" width="836" height="36" fill="#fafafa" stroke="#eceff1" stroke-width="1" rx="3"/>
+    <text x="332" y="469" font-size="10" fill="#555">_SpeakerTrack 動的継承廃止 + asyncio.get_event_loop() → get_running_loop() 統一</text>
+    <text x="714" y="469" font-size="9" fill="#888" font-family="monospace">g1_realtime_dialogue.py (WebRTCAudioBackend._SpeakerTrack)</text>
+
+    <!-- fix/g24-python-path -->
+    <rect x="0" y="492" width="220" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="110" y="512" font-size="10" font-weight="bold" fill="#546e7a" text-anchor="middle">fix/g24-python-path</text>
+    <rect x="6" y="518" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="529" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+    <rect x="222" y="492" width="100" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="272" y="514" font-size="10" fill="#546e7a" text-anchor="middle">Bug Fix</text>
+    <rect x="324" y="492" width="836" height="36" fill="#fafafa" stroke="#eceff1" stroke-width="1" rx="3"/>
+    <text x="332" y="509" font-size="10" fill="#555">g24 サーバー上 Python パス自動検出 (conda g1_deploy 優先)</text>
+    <text x="714" y="509" font-size="9" fill="#888" font-family="monospace">scripts/core/run_dialogue.sh</text>
+
+    <!-- fix/g24-tensorrt-path -->
+    <rect x="0" y="532" width="220" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="110" y="552" font-size="10" font-weight="bold" fill="#546e7a" text-anchor="middle">fix/g24-tensorrt-path</text>
+    <rect x="6" y="558" width="66" height="14" fill="#c8e6c9" rx="7"/>
+    <text x="39" y="569" font-size="8" fill="#2e7d32" text-anchor="middle">✅ マージ済み</text>
+    <rect x="222" y="532" width="100" height="36" fill="#fafafa" stroke="#78909c" stroke-width="1" rx="3"/>
+    <text x="272" y="554" font-size="10" fill="#546e7a" text-anchor="middle">Bug Fix</text>
+    <rect x="324" y="532" width="836" height="36" fill="#fafafa" stroke="#eceff1" stroke-width="1" rx="3"/>
+    <text x="332" y="549" font-size="10" fill="#555">run_deploy.sh — TensorRT パスを自動検出 (/opt/tensorrt 優先)</text>
+    <text x="714" y="549" font-size="9" fill="#888" font-family="monospace">scripts/core/run_deploy.sh</text>
+
+    <!-- ==========================================
+         BOTTOM SUMMARY BAR
+         ========================================== -->
+    <rect x="0" y="578" width="1160" height="38" fill="#263238" rx="2"/>
+    <text x="16" y="592" font-size="10" fill="#80cbc4">主要変更ファイル:</text>
+    <text x="16" y="607" font-size="10" fill="#80cbc4" font-family="monospace">src/dialogue_system/g1_realtime_dialogue.py</text>
+    <text x="300" y="607" font-size="10" fill="#a5d6a7" font-family="monospace">★ src/bridge/bridge.py</text>
+    <text x="490" y="607" font-size="10" fill="#a5d6a7" font-family="monospace">★ scripts/core/connect_webui.sh</text>
+    <text x="720" y="607" font-size="10" fill="#ffcc80" font-family="monospace">★ patches/…/base_sim.py</text>
+    <text x="930" y="607" font-size="10" fill="#cfd8dc" font-family="monospace">scripts/core/run_dialogue.sh</text>
+  </svg>
+  <footer>第8回対話システムライブコンペティション — mobile-robot-dialogue-system</footer>
+  <div class="page">43</div>
+</div>
+</body>
+</html>
