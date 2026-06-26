@@ -1,4 +1,4 @@
-# [進捗報告] Phase 1〜5 完了・Phase 6〜7 計画
+# [進捗報告] Phase 1〜7 完了・バグ修正 PR 作成済み
 
 ## 概要
 
@@ -6,7 +6,7 @@
 
 ---
 
-## ✅ 完了済み（Phase 1〜5）
+## ✅ 完了済み（Phase 1〜7）
 
 | Phase | 内容 | ブランチ |
 |-------|------|---------|
@@ -21,37 +21,33 @@
 | **4.3** | 運営提供バージョン同期（WSL 安定化・別スレッドレンダリング・CameraFrameSubscriber 移行） | feat/phase4-quality |
 | **5.1** | エコーキャンセル（音声ゲート方式 — TTS 再生中はマイク送信を停止 + 400ms クールダウン） | feat/phase5-enhancement |
 | **5.2** | シーンキャッシュ（TTL 30s）+ 接続後 3s で初回自動スキャン | feat/phase5-enhancement |
+| **6.1** | 会話フェーズ追跡（GREETING→TOURING→NEGOTIATING→CLOSING）+ `session.update` で動的 instructions 切替 | feat/phase6-strategy |
+| **7.1** | バックグラウンドシーン監視（25s 間隔で Vision スキャン・部長の動き検出） | feat/phase6-strategy |
+| **7.2** | 対話者位置追従ナビゲーション（Vision 結果から奥エリア移動を検出して先回り誘導） | feat/phase6-strategy |
+| **6.2** | `AudioBackend` 抽象化 + `WebRTCAudioBackend`（aiortc + aiohttp）、`--webrtc` フラグで切替 | feat/phase6.2-webrtc |
 
 ---
 
-## 🔲 残課題・未実装（Phase 6〜7 計画）
+## 🔧 バグ修正（`fix/webrtc-speaker-track` — PR レビュー中）
 
-### 高優先度
+| バグ | 症状 | 修正内容 |
+|------|------|---------|
+| `_SpeakerTrack` 動的継承 | `self.__class__` 差し替えで aiortc の `AudioStreamTrack.__init__` が正しく呼べない | モジュール先頭で条件付きインポート → 通常の静的継承に変更 |
+| `asyncio.get_event_loop()` × 5箇所 | Python 3.10+ で DeprecationWarning | `get_running_loop()` に統一 |
+| `KeyboardController` が `termios` をインポート | Windows で `ModuleNotFoundError` (Phase 4 修正済み・main 統合済み) | `sys.platform` チェックで非 Linux はスキップ |
+| `VISION_SUPPORTED_MODELS` に現行モデル未登録 | `gpt-4o-realtime-preview` で常に「未確認」警告 (Phase 4 修正済み・main 統合済み) | セットに追加 |
 
-- **Phase 6.1: 会話フェーズ追跡 + 動的プロンプト更新**
-  - 挨拶 → 案内 → 交渉 → クロージング の各フェーズで `session.update` により instructions を切り替え
-  - フェーズ移行はターン数またはキーワード検出で判定
-  - 評価項目 1（マルチモーダルなやりとり）・2（対面話法）・3（待遇表現）に直結
-
-- **Phase 7.1: バックグラウンドシーン監視**
-  - 20〜30 秒ごとに自動で `_analyze_scene()` を実行
-  - 部長が奥に向かっていたら先回りして `entrance` / `new_product` 方向へ誘導
-  - 評価項目 4（空間を適切に認識した動き）に直結
+## 🔲 残課題・未実装
 
 ### 中優先度
 
-- **Phase 7.2: 対話者位置に基づく動的ナビゲーション**
-  - Vision 結果（正面/左/右, 近/中/遠）からロボットの相対位置を維持
-  - 「先導」と「追従」を文脈に応じて切り替え
-
-- **Phase 6.2: WebRTC 音声バックエンド対応**
-  - 運営提供の仕様が確定後に対応
-  - `stream_mic()` / `play_audio()` をインターフェースで抽象化
+- **Phase 6.2 本実装: 運営 WebRTC 仕様への対応**
+  - 現在は aiortc + aiohttp による仮実装（`--webrtc` フラグで起動）
+  - `WebRTCAudioBackend` のみ差し替えれば OK な構造にしてあるため、仕様確定後に対応
 
 ### 低優先度
 
 - **リアルタイムモーション生成の統合**（Kimodo オンデマンド生成を対話中に使用）
-- **Windows 対応**（`termios` → クロスプラットフォーム制御）
 
 ---
 
@@ -60,9 +56,10 @@
 | 課題 | 詳細 | 回避策 |
 |------|------|--------|
 | VAD 誤検出 | エコーゲート期間外でも TTS の残響が speech_started を引き起こす可能性 | ECHO_GATE_COOLDOWN_S を延長（現在 0.40s） |
-| look_around レイテンシ | GPT-4o Vision API 呼び出しで 2〜4s かかる | シーンキャッシュで軽減（Phase 5.2）|
+| look_around レイテンシ | GPT-4o Vision API 呼び出しで 2〜4s かかる | シーンキャッシュで軽減（Phase 5.2） |
 | 旋回精度 | TURN_REPEAT_COUNT=5 でも環境によっては角度がずれる | TURN_STEP_DEG で微調整 |
 | WebRTC 未対応 | 予選・本選時の音声通信方式が異なる | 運営提供仕様待ち（Phase 6.2） |
+| フェーズ誤遷移 | キーワード検出が誤検出するケースあり（「奥」が別文脈で出現等） | 閾値調整・ターン数との組み合わせで抑制 |
 
 ---
 
@@ -78,8 +75,7 @@
 
 ## 次のアクション
 
-1. `feat/phase5-enhancement` の PR を作成して `main` にマージ
-2. `feat/phase5-enhancement` から `feat/phase6-strategy` を分岐して Phase 6.1 を着手
-3. 運営から WebRTC 仕様が届いたら Phase 6.2 に対応
+1. `fix/webrtc-speaker-track` の PR をレビュー・マージ
+2. 運営から WebRTC 仕様が届いたら Phase 6.2 本実装（`WebRTCAudioBackend` 差し替えのみ）
 
-/label: progress, phase5, planning
+/label: progress, phase7, planning
