@@ -6,7 +6,19 @@ cd "$EXTERN"
 
 # GPU設定
 GPU_SETTINGS="--gpus all"
-TENSORRT_MOUNT="-v /home/unitree-g1/TensorRT:/opt/TensorRT:ro"
+# TensorRT ホストパスを自動検出（環境変数 TENSORRT_ROOT > /opt/tensorrt > /home/unitree-g1/TensorRT）
+if [ -n "${TENSORRT_ROOT:-}" ] && [ -d "$TENSORRT_ROOT" ]; then
+    _TENSORRT_HOST="$TENSORRT_ROOT"
+elif [ -d "/opt/tensorrt" ]; then
+    _TENSORRT_HOST="/opt/tensorrt"
+elif [ -d "/home/unitree-g1/TensorRT" ] && [ -n "$(ls -A /home/unitree-g1/TensorRT 2>/dev/null)" ]; then
+    _TENSORRT_HOST="/home/unitree-g1/TensorRT"
+else
+    echo "[WARNING] TensorRT directory not found. Build may fail." >&2
+    _TENSORRT_HOST="/home/unitree-g1/TensorRT"
+fi
+echo "[run_deploy] TensorRT host path: $_TENSORRT_HOST"
+TENSORRT_MOUNT="-v ${_TENSORRT_HOST}:/opt/TensorRT:ro"
 DIALOGUE_HOST="${DIALOGUE_HOST:-localhost}"
 DIALOGUE_ZMQ_PORT="${DIALOGUE_ZMQ_PORT:-5556}"
 
