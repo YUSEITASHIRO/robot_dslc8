@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1280px; height:720px;
+  background:#595959;
+  display:flex; align-items:center; justify-content:center;
+  font-family:"Yu Gothic","Meiryo","Hiragino Kaku Gothic ProN",sans-serif;
+}
+.slide {
+  width:1200px; height:675px;
+  background:#ffffff;
+  position:relative; overflow:hidden;
+}
+h1 { position:absolute; top:16px; left:24px; font-size:20px; font-weight:600; color:#1a1a1a; }
+footer {
+  position:absolute; bottom:8px; width:100%; text-align:center;
+  font-size:10px; color:#888;
+}
+.page { position:absolute; bottom:6px; right:16px; font-size:15px; font-weight:bold; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <h1>WebUI接続構成図（Phase 8 — bridge.py）</h1>
+  <svg width="1160" height="618" style="position:absolute;top:46px;left:20px" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a"  markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#404040"/></marker>
+      <marker id="ag" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#2e7d32"/></marker>
+      <marker id="ab" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#1565c0"/></marker>
+      <marker id="ao" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#e65100"/></marker>
+      <marker id="as" markerWidth="9" markerHeight="6" refX="1" refY="3" orient="auto"><polygon points="9 0,0 3,9 6" fill="#404040"/></marker>
+      <marker id="ab-s" markerWidth="9" markerHeight="6" refX="1" refY="3" orient="auto"><polygon points="9 0,0 3,9 6" fill="#1565c0"/></marker>
+    </defs>
+
+    <!-- ===================================================
+         LEFT: 参加者PC (Windows/Mac)  x=0..490, y=40..580
+         =================================================== -->
+    <rect x="0" y="40" width="490" height="540" fill="#f5f9ff" stroke="#336699" stroke-width="2" rx="6"/>
+    <text x="10" y="60" font-size="14" font-weight="bold" fill="#336699">参加者PC（Windows/Mac）</text>
+
+    <!-- Browser box -->
+    <rect x="18" y="74" width="222" height="188" fill="#fff8e1" stroke="#f57f17" stroke-width="2" rx="6"/>
+    <text x="129" y="98" font-size="13" font-weight="bold" fill="#e65100" text-anchor="middle">★ Browser</text>
+    <text x="129" y="116" font-size="10" fill="#666" text-anchor="middle">Chrome / Edge</text>
+    <!-- UI mockup -->
+    <rect x="35" y="126" width="188" height="72" fill="white" stroke="#ccc" stroke-width="1" rx="3"/>
+    <text x="129" y="150" font-size="10" fill="#555" text-anchor="middle">http://localhost:8765</text>
+    <!-- Buttons mockup -->
+    <rect x="48" y="160" width="78" height="28" fill="#4caf50" rx="14"/>
+    <text x="87" y="178" font-size="11" fill="white" text-anchor="middle">🎤 接続</text>
+    <rect x="138" y="160" width="78" height="28" fill="#bbb" rx="14"/>
+    <text x="177" y="178" font-size="11" fill="white" text-anchor="middle">🔇 切断</text>
+
+    <text x="129" y="218" font-size="10" fill="#555" text-anchor="middle">WebSocket 接続</text>
+    <text x="129" y="232" font-size="10" fill="#1565c0" text-anchor="middle">ws://localhost:8765/ws</text>
+    <text x="129" y="248" font-size="10" fill="#555" text-anchor="middle">音声ストリーミング (PCM)</text>
+
+    <!-- connect_webui.sh box -->
+    <rect x="18" y="278" width="222" height="130" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5" rx="5"/>
+    <text x="129" y="298" font-size="12" font-weight="bold" fill="#2e7d32" text-anchor="middle">★ connect_webui.sh</text>
+    <text x="129" y="315" font-size="10" fill="#2e7d32" text-anchor="middle">scripts/core/connect_webui.sh</text>
+    <rect x="30" y="324" width="198" height="14" fill="white" rx="2"/>
+    <text x="129" y="335" font-size="9" fill="#333" text-anchor="middle" font-family="monospace">bash scripts/core/connect_webui.sh</text>
+    <text x="36" y="356" font-size="9" fill="#555">① SSH ControlMaster 接続確立</text>
+    <text x="36" y="372" font-size="9" fill="#555">② -L 8765:localhost:8765 ポート転送</text>
+    <text x="36" y="388" font-size="9" fill="#555">③ tmux robot:3 で bridge.py 起動</text>
+    <text x="36" y="400" font-size="9" fill="#555">④ ブラウザを自動 open</text>
+
+    <!-- SSH ControlMaster box -->
+    <rect x="18" y="426" width="222" height="80" fill="#ede7f6" stroke="#5e35b1" stroke-width="1.5" rx="5"/>
+    <text x="129" y="446" font-size="11" font-weight="bold" fill="#4527a0" text-anchor="middle">SSH ControlMaster</text>
+    <text x="129" y="463" font-size="9" fill="#555" text-anchor="middle">ssh -fNM -S /tmp/ssh_ctl_g24</text>
+    <text x="129" y="478" font-size="9" fill="#555" text-anchor="middle">-L 8765:localhost:8765 g24</text>
+    <text x="129" y="493" font-size="9" fill="#888" text-anchor="middle">切断: ssh -S /tmp/ssh_ctl_g24 -O exit g24</text>
+
+    <!-- Port forwarding label below -->
+    <rect x="18" y="518" width="222" height="48" fill="none" stroke="#888" stroke-width="1" stroke-dasharray="4,3" rx="3"/>
+    <text x="129" y="536" font-size="10" fill="#666" text-anchor="middle">localhost:8765</text>
+    <text x="129" y="552" font-size="10" fill="#666" text-anchor="middle">→ SSH → g24:8765</text>
+    <text x="129" y="562" font-size="8" fill="#aaa" text-anchor="middle">（透過転送）</text>
+
+    <!-- OpenAI API box (right side of PC) -->
+    <rect x="256" y="74" width="218" height="80" fill="#fce4ec" stroke="#c62828" stroke-width="1.5" rx="5"/>
+    <text x="365" y="94" font-size="12" font-weight="bold" fill="#c62828" text-anchor="middle">OpenAI Realtime API</text>
+    <text x="365" y="112" font-size="10" fill="#555" text-anchor="middle">gpt-4o-realtime-preview</text>
+    <text x="365" y="128" font-size="10" fill="#555" text-anchor="middle">STT・推論・TTS</text>
+    <text x="365" y="144" font-size="9" fill="#888" text-anchor="middle">WebSocket wss://api.openai.com/…</text>
+
+    <!-- g1_realtime_dialogue.py on PC side -->
+    <rect x="256" y="170" width="218" height="180" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="365" y="192" font-size="12" font-weight="bold" fill="#1565c0" text-anchor="middle">g1_realtime_dialogue.py</text>
+    <text x="365" y="208" font-size="10" fill="#555" text-anchor="middle">（bridge.py が subprocess 起動）</text>
+    <text x="268" y="230" font-size="10" fill="#333">• GridNavigator + RobotPoseSubscriber</text>
+    <text x="268" y="247" font-size="10" fill="#333">• CameraFrameSubscriber</text>
+    <text x="268" y="264" font-size="10" fill="#333">• Function Calling ツール群</text>
+    <text x="268" y="281" font-size="10" fill="#333">• 会話フェーズ追跡</text>
+    <text x="268" y="298" font-size="10" fill="#333">• エコーキャンセル</text>
+    <text x="268" y="315" font-size="10" fill="#333">• シーンキャッシュ</text>
+    <text x="268" y="332" font-size="9" fill="#888">src/dialogue_system/g1_realtime_dialogue.py</text>
+
+    <!-- ===================================================
+         CENTER: SSH トンネル表示  x=490..670
+         =================================================== -->
+    <!-- SSH tunnel pipe -->
+    <rect x="500" y="200" width="160" height="200" fill="#ede7f6" stroke="#5e35b1" stroke-width="1.5" stroke-dasharray="8,4" rx="6"/>
+    <text x="580" y="224" font-size="12" font-weight="bold" fill="#4527a0" text-anchor="middle">SSH</text>
+    <text x="580" y="242" font-size="12" font-weight="bold" fill="#4527a0" text-anchor="middle">トンネル</text>
+    <text x="580" y="264" font-size="10" fill="#555" text-anchor="middle">TCP</text>
+    <text x="580" y="280" font-size="10" fill="#555" text-anchor="middle">port:8765</text>
+    <!-- Tunnel lines -->
+    <line x1="520" y1="295" x2="640" y2="295" stroke="#5e35b1" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="520" y1="310" x2="640" y2="310" stroke="#5e35b1" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="520" y1="325" x2="640" y2="325" stroke="#5e35b1" stroke-width="1" stroke-dasharray="4,4"/>
+    <text x="580" y="355" font-size="9" fill="#888" text-anchor="middle">WebSocket + PCM音声</text>
+    <text x="580" y="368" font-size="9" fill="#888" text-anchor="middle">transparently forwarded</text>
+
+    <!-- Left tunnel arrow (PC side → tunnel) -->
+    <line x1="242" y1="307" x2="498" y2="307" stroke="#1565c0" stroke-width="2" marker-end="url(#ab)" marker-start="url(#ab-s)"/>
+
+    <!-- ===================================================
+         RIGHT: g24サーバー  x=670..1160, y=40..580
+         =================================================== -->
+    <rect x="668" y="40" width="490" height="540" fill="#fff5f5" stroke="#cc3333" stroke-width="2" rx="6"/>
+    <text x="680" y="60" font-size="14" font-weight="bold" fill="#cc3333">g24 サーバー（Ubuntu・GPU環境）</text>
+
+    <!-- bridge.py main box -->
+    <rect x="686" y="74" width="260" height="290" fill="#e8f5e9" stroke="#43a047" stroke-width="2" rx="6"/>
+    <text x="816" y="98" font-size="14" font-weight="bold" fill="#2e7d32" text-anchor="middle">★ bridge.py</text>
+    <text x="816" y="116" font-size="10" fill="#555" text-anchor="middle">src/bridge/bridge.py</text>
+
+    <!-- aiohttp server -->
+    <rect x="698" y="128" width="236" height="50" fill="white" stroke="#43a047" stroke-width="1" rx="3"/>
+    <text x="816" y="148" font-size="11" font-weight="bold" fill="#2e7d32" text-anchor="middle">aiohttp WebSocket サーバー</text>
+    <text x="816" y="166" font-size="10" fill="#555" text-anchor="middle">0.0.0.0:8765  /ws エンドポイント</text>
+
+    <!-- Endpoints -->
+    <rect x="698" y="188" width="236" height="64" fill="#f1f8e9" stroke="#43a047" stroke-width="1" rx="3"/>
+    <text x="816" y="207" font-size="10" font-weight="bold" fill="#33691e" text-anchor="middle">エンドポイント</text>
+    <text x="706" y="224" font-size="10" fill="#333">GET  /         → WebUI HTML</text>
+    <text x="706" y="240" font-size="10" fill="#333">WS   /ws       → 音声双方向</text>
+    <text x="706" y="256" font-size="9" fill="#888">POST /connect  / /disconnect</text>
+
+    <!-- Audio connect/disconnect logic -->
+    <rect x="698" y="262" width="236" height="74" fill="white" stroke="#43a047" stroke-width="1" rx="3"/>
+    <text x="816" y="281" font-size="10" font-weight="bold" fill="#2e7d32" text-anchor="middle">接続制御ロジック</text>
+    <text x="706" y="298" font-size="10" fill="#333">_audio_connect():</text>
+    <text x="714" y="312" font-size="9" fill="#555">→ g1_realtime_dialogue.py を subprocess 起動</text>
+    <text x="706" y="326" font-size="10" fill="#333">_audio_disconnect():</text>
+    <text x="714" y="336" font-size="9" fill="#555">→ process.terminate()</text>
+
+    <!-- tmux session label -->
+    <rect x="686" y="376" width="260" height="38" fill="none" stroke="#888" stroke-width="1" stroke-dasharray="4,3" rx="3"/>
+    <text x="816" y="394" font-size="10" fill="#666" text-anchor="middle">tmux セッション: robot  ウィンドウ: 3</text>
+    <text x="816" y="410" font-size="9" fill="#aaa" text-anchor="middle">常駐プロセスとして管理</text>
+
+    <!-- Audio subprocess box -->
+    <rect x="686" y="428" width="260" height="80" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="816" y="448" font-size="11" font-weight="bold" fill="#1565c0" text-anchor="middle">g1_realtime_dialogue.py</text>
+    <text x="816" y="464" font-size="10" fill="#555" text-anchor="middle">（bridge から subprocess 起動）</text>
+    <text x="694" y="484" font-size="10" fill="#555">stdin/stdout でブリッジと通信</text>
+    <text x="694" y="500" font-size="10" fill="#555">ZMQ, WebRTC, OpenAI API を使用</text>
+
+    <!-- subprocess arrow -->
+    <line x1="816" y1="418" x2="816" y2="426" stroke="#2e7d32" stroke-width="2" marker-end="url(#ag)"/>
+    <text x="820" y="424" font-size="9" fill="#2e7d32">subprocess.Popen()</text>
+
+    <!-- ZMQ connections to robots (right side) -->
+    <rect x="960" y="74" width="186" height="120" fill="#fff0f0" stroke="#cc3333" stroke-width="1" rx="4"/>
+    <text x="1053" y="94" font-size="11" font-weight="bold" fill="#cc3333" text-anchor="middle">運営側システム</text>
+    <text x="1053" y="112" font-size="10" fill="#555" text-anchor="middle">G1シミュレータ</text>
+    <text x="1053" y="128" font-size="10" fill="#555" text-anchor="middle">GEAR-SONIC</text>
+    <text x="1053" y="148" font-size="9" fill="#888" text-anchor="middle">ZMQ:5555 カメラ →</text>
+    <text x="1053" y="162" font-size="9" fill="#888" text-anchor="middle">ZMQ:5556 コマンド ↑</text>
+    <text x="1053" y="176" font-size="9" fill="#2e7d32" text-anchor="middle">★ZMQ:5557 pose ↓</text>
+
+    <!-- Arrow from 運営 to dialogue -->
+    <line x1="960" y1="134" x2="948" y2="134" stroke="#404040" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <!-- PulseAudio note -->
+    <rect x="960" y="210" width="186" height="80" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1" rx="4"/>
+    <text x="1053" y="232" font-size="11" font-weight="bold" fill="#7b1fa2" text-anchor="middle">PulseAudio</text>
+    <text x="1053" y="250" font-size="10" fill="#555" text-anchor="middle">g24 上の音声ルーティング</text>
+    <text x="1053" y="266" font-size="9" fill="#888" text-anchor="middle">ヘッドセット / スピーカー制御</text>
+    <text x="1053" y="282" font-size="9" fill="#888" text-anchor="middle">手動起動（要自動化）</text>
+
+    <!-- Tunnel → bridge connection arrow (right side of tunnel → left of bridge) -->
+    <line x1="662" y1="307" x2="684" y2="307" stroke="#1565c0" stroke-width="2" marker-end="url(#ab)"/>
+
+    <!-- OpenAI API connection from g24/dialogue -->
+    <rect x="960" y="310" width="186" height="60" fill="#fce4ec" stroke="#c62828" stroke-width="1" rx="4"/>
+    <text x="1053" y="333" font-size="11" font-weight="bold" fill="#c62828" text-anchor="middle">OpenAI Realtime API</text>
+    <text x="1053" y="350" font-size="10" fill="#555" text-anchor="middle">gpt-4o-realtime-preview</text>
+    <text x="1053" y="365" font-size="9" fill="#888" text-anchor="middle">インターネット経由</text>
+
+    <!-- Arrow dialogue → OpenAI -->
+    <line x1="948" y1="460" x2="958" y2="340" stroke="#c62828" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a)"/>
+    <text x="958" y="400" font-size="9" fill="#c62828">wss://</text>
+
+    <!-- ===================================================
+         FLOW LABELS
+         =================================================== -->
+    <text x="580" y="425" font-size="13" font-weight="bold" fill="#333" text-anchor="middle">接続フロー</text>
+    <rect x="490" y="438" width="180" height="130" fill="white" stroke="#ccc" stroke-width="1" rx="3"/>
+    <text x="500" y="458" font-size="10" fill="#555">① bash connect_webui.sh</text>
+    <text x="500" y="476" font-size="10" fill="#555">② SSH 接続 + port 転送確立</text>
+    <text x="500" y="494" font-size="10" fill="#555">③ bridge.py が tmux 起動</text>
+    <text x="500" y="512" font-size="10" fill="#555">④ ブラウザ自動 open</text>
+    <text x="500" y="530" font-size="10" fill="#555">⑤ 🎤 クリック → subprocess 起動</text>
+    <text x="500" y="548" font-size="10" fill="#555">⑥ 対話開始（双方向音声）</text>
+    <text x="500" y="560" font-size="9" fill="#888">⑦ 🔇 クリック → 切断</text>
+  </svg>
+  <footer>第8回対話システムライブコンペティション — mobile-robot-dialogue-system</footer>
+  <div class="page">42</div>
+</div>
+</body>
+</html>

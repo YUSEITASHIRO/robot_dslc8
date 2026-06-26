@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  width:1280px; height:720px;
+  background:#595959;
+  display:flex; align-items:center; justify-content:center;
+  font-family:"Yu Gothic","Meiryo","Hiragino Kaku Gothic ProN",sans-serif;
+}
+.slide {
+  width:1200px; height:675px;
+  background:#ffffff;
+  position:relative; overflow:hidden;
+}
+h1 { position:absolute; top:16px; left:24px; font-size:20px; font-weight:600; color:#1a1a1a; }
+footer {
+  position:absolute; bottom:8px; width:100%; text-align:center;
+  font-size:10px; color:#888;
+}
+.page { position:absolute; bottom:6px; right:16px; font-size:15px; font-weight:bold; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <h1>システム構成図（本実装の変更箇所）</h1>
+  <svg width="1160" height="618" style="position:absolute;top:46px;left:20px" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a"   markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#404040"/></marker>
+      <marker id="ag"  markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#2e7d32"/></marker>
+      <marker id="ab"  markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#1565c0"/></marker>
+      <marker id="ao"  markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="#e65100"/></marker>
+      <marker id="ar-s" markerWidth="9" markerHeight="6" refX="1" refY="3" orient="auto"><polygon points="9 0,0 3,9 6" fill="#404040"/></marker>
+      <marker id="ab-s" markerWidth="9" markerHeight="6" refX="1" refY="3" orient="auto"><polygon points="9 0,0 3,9 6" fill="#1565c0"/></marker>
+    </defs>
+
+    <!-- ======================================================
+         TOP: 運営側プラットフォーム (y=0..190)
+         ====================================================== -->
+    <rect x="0" y="0" width="825" height="190" fill="#fff5f5" stroke="#cc3333" stroke-width="1.5" stroke-dasharray="8,4" rx="3"/>
+    <text x="8" y="15" font-size="12" fill="#cc3333" font-weight="bold">運営側プラットフォーム（Ubuntu・GPUあり）</text>
+    <text x="740" y="15" font-size="11" fill="#cc3333" font-weight="bold">運営で固定</text>
+
+    <!-- G1シミュレータ box -->
+    <rect x="14" y="22" width="172" height="82" fill="#dce6f1" stroke="#4472c4" stroke-width="1.5" rx="5"/>
+    <text x="100" y="46" font-size="13" font-weight="bold" fill="#1a1a1a" text-anchor="middle">G1シミュレータ</text>
+    <text x="100" y="63" font-size="11" fill="#555" text-anchor="middle">(G1実機)</text>
+    <rect x="30" y="70" width="140" height="26" fill="#b8cce4" rx="3"/>
+    <text x="100" y="87" font-size="12" fill="#1a1a1a" text-anchor="middle">音声再生</text>
+
+    <!-- G1シミュ → GEAR-SONIC (トルク) -->
+    <line x1="187" y1="48" x2="302" y2="48" stroke="#404040" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="245" y="42" font-size="10" fill="#333" text-anchor="middle">トルク/位置指令</text>
+    <!-- GEAR-SONIC → G1シミュ (関節角度) -->
+    <line x1="302" y1="65" x2="187" y2="65" stroke="#404040" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="245" y="78" font-size="10" fill="#333" text-anchor="middle">関節角度・速度</text>
+
+    <!-- GEAR-SONIC box -->
+    <rect x="304" y="22" width="174" height="82" fill="#dce6f1" stroke="#4472c4" stroke-width="1.5" rx="5"/>
+    <text x="391" y="46" font-size="13" font-weight="bold" fill="#1a1a1a" text-anchor="middle">GEAR-SONIC</text>
+    <text x="391" y="63" font-size="11" fill="#555" text-anchor="middle">(G1の全身制御)</text>
+    <rect x="320" y="70" width="142" height="26" fill="#b8cce4" rx="3"/>
+    <text x="391" y="87" font-size="12" fill="#1a1a1a" text-anchor="middle">動作再生</text>
+
+    <!-- GEAR-SONIC → 動作DB -->
+    <line x1="480" y1="53" x2="520" y2="53" stroke="#404040" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="502" y="46" font-size="9" fill="#333" text-anchor="middle">動作読み込む</text>
+    <!-- 動作DB → GEAR-SONIC (joint_pose/vel) -->
+    <line x1="520" y1="68" x2="480" y2="68" stroke="#404040" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="502" y="80" font-size="9" fill="#333" text-anchor="middle">joint_pose/vel</text>
+
+    <!-- 動作DB (cylinder-style rounded rect) -->
+    <rect x="522" y="22" width="122" height="74" fill="#7f7f7f" rx="8"/>
+    <ellipse cx="583" cy="22" rx="61" ry="9" fill="#a0a0a0"/>
+    <text x="583" y="66" font-size="13" fill="white" text-anchor="middle" font-weight="bold">動作DB</text>
+
+    <!-- ★ base_sim.py 追加アノテーション (GREEN dashed) -->
+    <rect x="14" y="116" width="272" height="66" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5" stroke-dasharray="6,3" rx="4"/>
+    <text x="22" y="134" font-size="12" fill="#2e7d32" font-weight="bold">★ patches/…/base_sim.py を改変</text>
+    <text x="22" y="152" font-size="11" fill="#2e7d32">init_publisher(): ZMQ PUB tcp://*:5557</text>
+    <text x="22" y="168" font-size="10" fill="#555">start(): mj_data.qpos[0:3] を 0.1s 毎に送信</text>
+    <!-- G1シミュ → annotation の破線緑矢印 -->
+    <line x1="100" y1="104" x2="100" y2="114" stroke="#43a047" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ag)"/>
+
+    <!-- ======================================================
+         SECTION DIVIDER + ZMQ CONNECTIONS (y=190..215)
+         ====================================================== -->
+    <!-- ZMQ 5555 camera (DOWN gray) -->
+    <line x1="62" y1="190" x2="62" y2="222" stroke="#606060" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="65" y="208" font-size="9" fill="#555">ZMQ:5555 カメラ</text>
+
+    <!-- ★ ZMQ 5557 pose (DOWN GREEN) -->
+    <line x1="150" y1="182" x2="150" y2="222" stroke="#2e7d32" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+    <rect x="152" y="192" width="116" height="16" fill="white" opacity="0.9"/>
+    <text x="155" y="204" font-size="10" fill="#2e7d32" font-weight="bold">★ZMQ:5557 pose (NEW)</text>
+
+    <!-- ZMQ 5556 commands (UP gray) -->
+    <line x1="430" y1="222" x2="430" y2="102" stroke="#606060" stroke-width="1.5" marker-end="url(#a)"/>
+    <text x="435" y="200" font-size="9" fill="#555">ZMQ:5556</text>
+    <text x="435" y="212" font-size="9" fill="#555">Waypoints/コマンド↑</text>
+
+    <!-- ロボット視点映像 (DOWN gray from G1シミュ) -->
+    <line x1="62" y1="104" x2="62" y2="190" stroke="#606060" stroke-width="1.5"/>
+    <text x="65" y="145" font-size="9" fill="#555">ロボット視点映像</text>
+    <text x="65" y="157" font-size="9" fill="#555">512×512 15FPS</text>
+
+    <!-- ======================================================
+         BOTTOM: 参加者PC (y=225..618)
+         ====================================================== -->
+    <rect x="0" y="225" width="1160" height="393" fill="none" stroke="#336699" stroke-width="1.5" rx="3"/>
+    <text x="8" y="240" font-size="12" fill="#336699" font-weight="bold">参加者PC（Windows/Mac）</text>
+
+    <!-- 音声対話システム outer box -->
+    <rect x="8" y="248" width="822" height="362" fill="#f0f4ff" stroke="#336699" stroke-width="1" rx="4"/>
+    <text x="18" y="264" font-size="11" fill="#336699" font-weight="bold">音声対話システム / g1_realtime_dialogue.py</text>
+
+    <!-- GridNavigator -->
+    <rect x="18" y="272" width="165" height="64" fill="#dce6f1" stroke="#4472c4" stroke-width="1" rx="4"/>
+    <text x="100" y="292" font-size="12" font-weight="bold" fill="#1a1a1a" text-anchor="middle">GridNavigator</text>
+    <text x="100" y="308" font-size="10" fill="#555" text-anchor="middle">_xi, _yi: セル座標管理</text>
+    <text x="100" y="324" font-size="10" fill="#555" text-anchor="middle">navigate_to で移動制御</text>
+
+    <!-- ★ RobotPoseSubscriber (NEW GREEN) -->
+    <rect x="18" y="348" width="165" height="80" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5" rx="4"/>
+    <text x="100" y="366" font-size="11" font-weight="bold" fill="#2e7d32" text-anchor="middle">★ RobotPoseSubscriber</text>
+    <text x="100" y="381" font-size="10" fill="#2e7d32" text-anchor="middle">ZMQ SUB port:5557</text>
+    <text x="100" y="396" font-size="10" fill="#555" text-anchor="middle">qpos→_nearest_grid()</text>
+    <text x="100" y="411" font-size="9" fill="#888" text-anchor="middle">→GridNavigator._xi/_yi 同期</text>
+    <!-- Arrow: ZMQ 5557 → RobotPoseSubscriber -->
+    <line x1="150" y1="222" x2="150" y2="346" stroke="#2e7d32" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+
+    <!-- CameraFrameSubscriber -->
+    <rect x="18" y="440" width="165" height="60" fill="#dce6f1" stroke="#4472c4" stroke-width="1" rx="4"/>
+    <text x="100" y="460" font-size="11" font-weight="bold" fill="#1a1a1a" text-anchor="middle">CameraFrameSubscriber</text>
+    <text x="100" y="476" font-size="10" fill="#555" text-anchor="middle">ZMQ SUB port:5555</text>
+    <text x="100" y="492" font-size="10" fill="#555" text-anchor="middle">カメラフレーム受信</text>
+    <!-- ZMQ 5555 → CameraFrameSubscriber -->
+    <line x1="62" y1="222" x2="62" y2="438" stroke="#606060" stroke-width="1.5" marker-end="url(#a)"/>
+
+    <!-- gpt-4o-realtime center box -->
+    <rect x="198" y="270" width="334" height="246" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" rx="5"/>
+    <text x="365" y="290" font-size="13" font-weight="bold" fill="#1565c0" text-anchor="middle">gpt-4o-realtime</text>
+    <text x="365" y="308" font-size="11" fill="#1565c0" text-anchor="middle">STT・推論・TTS</text>
+
+    <!-- 対話プロンプト sub-box -->
+    <rect x="208" y="318" width="152" height="90" fill="white" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="284" y="336" font-size="10" font-weight="bold" fill="#1565c0" text-anchor="middle">対話プロンプト</text>
+    <text x="284" y="352" font-size="10" fill="#333" text-anchor="middle">清水店長ペルソナ</text>
+    <text x="284" y="366" font-size="10" fill="#333" text-anchor="middle">評価軸準拠行動規則</text>
+    <text x="284" y="381" font-size="10" fill="#333" text-anchor="middle">39動作一覧</text>
+    <text x="284" y="396" font-size="9" fill="#888" text-anchor="middle">SYSTEM_PROMPT</text>
+
+    <!-- Function Calling sub-box -->
+    <rect x="370" y="318" width="152" height="90" fill="white" stroke="#1565c0" stroke-width="1" rx="3"/>
+    <text x="446" y="336" font-size="10" font-weight="bold" fill="#1565c0" text-anchor="middle">Function Calling</text>
+    <text x="446" y="353" font-size="10" fill="#333" text-anchor="middle">navigate_to</text>
+    <text x="446" y="368" font-size="10" fill="#333" text-anchor="middle">point_at</text>
+    <text x="446" y="383" font-size="10" fill="#333" text-anchor="middle">look_around</text>
+    <text x="446" y="398" font-size="10" fill="#333" text-anchor="middle">perform_motion</text>
+
+    <!-- backchannel + echo cancel bottom of gpt box -->
+    <rect x="208" y="418" width="149" height="48" fill="#fff9c4" stroke="#f9a825" stroke-width="1" rx="3"/>
+    <text x="282" y="436" font-size="10" font-weight="bold" fill="#e65100" text-anchor="middle">バックチャネル相づち</text>
+    <text x="282" y="451" font-size="10" fill="#555" text-anchor="middle">nod: speech_started +1.5s</text>
+    <text x="282" y="463" font-size="9" fill="#888" text-anchor="middle">Phase 3.2</text>
+
+    <rect x="368" y="418" width="154" height="48" fill="#fce4ec" stroke="#c62828" stroke-width="1" rx="3"/>
+    <text x="445" y="436" font-size="10" font-weight="bold" fill="#c62828" text-anchor="middle">エコーキャンセル</text>
+    <text x="445" y="451" font-size="10" fill="#555" text-anchor="middle">TTS中マイク遮断+400ms</text>
+    <text x="445" y="463" font-size="9" fill="#888" text-anchor="middle">Phase 5.1</text>
+
+    <!-- Right column of 音声対話システム -->
+    <!-- Phase tracking -->
+    <rect x="548" y="270" width="272" height="108" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1" rx="4"/>
+    <text x="684" y="290" font-size="11" font-weight="bold" fill="#7b1fa2" text-anchor="middle">会話フェーズ追跡 (Phase 6.1)</text>
+    <text x="684" y="309" font-size="12" fill="#4a148c" text-anchor="middle">GREETING → TOURING</text>
+    <text x="684" y="328" font-size="12" fill="#4a148c" text-anchor="middle">NEGOTIATING → CLOSING</text>
+    <text x="684" y="347" font-size="10" fill="#555" text-anchor="middle">session.update で動的 instructions 切替</text>
+    <text x="684" y="363" font-size="9" fill="#888" text-anchor="middle">フェーズ別応答スタイル</text>
+
+    <!-- Scene cache -->
+    <rect x="548" y="390" width="272" height="68" fill="#fff8e1" stroke="#f57f17" stroke-width="1" rx="4"/>
+    <text x="684" y="409" font-size="11" font-weight="bold" fill="#e65100" text-anchor="middle">シーンキャッシュ (Phase 5.2)</text>
+    <text x="684" y="427" font-size="10" fill="#555" text-anchor="middle">TTL:30s  接続後3sで自動スキャン</text>
+    <text x="684" y="443" font-size="10" fill="#555" text-anchor="middle">look_around 結果を再利用</text>
+
+    <!-- Vision monitor -->
+    <rect x="548" y="470" width="272" height="64" fill="#e0f2f1" stroke="#00695c" stroke-width="1" rx="4"/>
+    <text x="684" y="489" font-size="11" font-weight="bold" fill="#00695c" text-anchor="middle">バックグラウンド Vision 監視 (Phase 7)</text>
+    <text x="684" y="507" font-size="10" fill="#555" text-anchor="middle">25s 間隔スキャン / 部長の動き検出</text>
+    <text x="684" y="522" font-size="10" fill="#555" text-anchor="middle">対話者位置追従ナビゲーション</text>
+
+    <!-- ★ bridge.py (NEW GREEN) -->
+    <rect x="842" y="248" width="152" height="118" fill="#e8f5e9" stroke="#43a047" stroke-width="2" rx="5"/>
+    <text x="918" y="268" font-size="11" font-weight="bold" fill="#2e7d32" text-anchor="middle">★ bridge.py</text>
+    <text x="918" y="284" font-size="10" fill="#2e7d32" text-anchor="middle">(Phase 8 — WebUI)</text>
+    <rect x="855" y="292" width="126" height="20" fill="white" stroke="#43a047" stroke-width="1" rx="2"/>
+    <text x="918" y="306" font-size="10" fill="#333" text-anchor="middle">aiohttp WebSocket</text>
+    <text x="918" y="323" font-size="10" fill="#555" text-anchor="middle">port: 8765</text>
+    <text x="918" y="340" font-size="10" fill="#555" text-anchor="middle">_audio_connect()</text>
+    <text x="918" y="356" font-size="10" fill="#555" text-anchor="middle">_audio_disconnect()</text>
+
+    <!-- ★ Browser WebUI (NEW YELLOW) -->
+    <rect x="1005" y="248" width="148" height="118" fill="#fff8e1" stroke="#f57f17" stroke-width="2" rx="5"/>
+    <text x="1079" y="268" font-size="11" font-weight="bold" fill="#e65100" text-anchor="middle">★ Browser WebUI</text>
+    <text x="1079" y="284" font-size="10" fill="#e65100" text-anchor="middle">(Phase 8)</text>
+    <text x="1079" y="308" font-size="18" text-anchor="middle">🎤🔇</text>
+    <text x="1079" y="328" font-size="10" fill="#555" text-anchor="middle">接続/切断ボタン</text>
+    <text x="1079" y="345" font-size="10" fill="#555" text-anchor="middle">音声ストリーミング</text>
+    <text x="1079" y="362" font-size="10" fill="#555" text-anchor="middle">ws://localhost:8765</text>
+
+    <!-- bridge.py ↔ browser arrow -->
+    <line x1="994" y1="307" x2="1003" y2="307" stroke="#f57f17" stroke-width="2" marker-end="url(#ao)" marker-start="url(#ab-s)"/>
+
+    <!-- bridge.py → dialogue subprocess arrow -->
+    <line x1="842" y1="300" x2="832" y2="300" stroke="#43a047" stroke-width="1.5" marker-end="url(#ag)"/>
+    <text x="834" y="292" font-size="9" fill="#2e7d32" text-anchor="end">subprocess</text>
+
+    <!-- SSH tunnel annotation -->
+    <rect x="842" y="378" width="311" height="50" fill="none" stroke="#888" stroke-width="1" stroke-dasharray="4,3" rx="3"/>
+    <text x="849" y="396" font-size="10" fill="#666">SSH ControlMaster  -L 8765:localhost:8765</text>
+    <text x="849" y="412" font-size="10" fill="#666">scripts/core/connect_webui.sh</text>
+
+    <!-- ★ connect_webui.sh label -->
+    <rect x="842" y="435" width="311" height="42" fill="#e8f5e9" stroke="#43a047" stroke-width="1" rx="3"/>
+    <text x="849" y="453" font-size="10" fill="#2e7d32" font-weight="bold">★ scripts/core/connect_webui.sh (NEW)</text>
+    <text x="849" y="469" font-size="10" fill="#555">一発起動: SSH + bridge.py + ブラウザ open</text>
+
+    <!-- WebRTC label (left side of slide, outside our box) -->
+    <!-- ユーザ person icon (simple) -->
+    <circle cx="1128" cy="480" r="14" fill="#e0e0e0" stroke="#888" stroke-width="1"/>
+    <line x1="1128" y1="494" x2="1128" y2="530" stroke="#888" stroke-width="2"/>
+    <line x1="1108" y1="510" x2="1148" y2="510" stroke="#888" stroke-width="2"/>
+    <line x1="1128" y1="530" x2="1110" y2="555" stroke="#888" stroke-width="2"/>
+    <line x1="1128" y1="530" x2="1146" y2="555" stroke="#888" stroke-width="2"/>
+    <text x="1128" y="578" font-size="12" font-weight="bold" fill="#333" text-anchor="middle">ユーザ</text>
+    <text x="1128" y="593" font-size="10" fill="#888" text-anchor="middle">（湯川 部長）</text>
+
+    <!-- ユーザ → browser WebRTC arrow -->
+    <line x1="1079" y1="366" x2="1100" y2="455" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#ab)"/>
+    <text x="1095" y="420" font-size="9" fill="#1565c0">WebRTC</text>
+    <text x="1095" y="432" font-size="9" fill="#1565c0">音声</text>
+
+    <!-- ZMQ port legends (bottom) -->
+    <rect x="8" y="546" width="505" height="56" fill="none" stroke="#ccc" stroke-width="1" rx="3"/>
+    <text x="18" y="562" font-size="10" font-weight="bold" fill="#333">ZMQ 接続一覧</text>
+    <text x="18" y="578" font-size="10" fill="#555">port:5555 ← カメラフレーム (G1シミュレータ→CameraFrameSubscriber)</text>
+    <text x="18" y="592" font-size="10" fill="#555">port:5556 ↑ Waypoints/動作コマンド (音声対話システム→GEAR-SONIC)</text>
+    <text x="18" y="604" font-size="10" fill="#2e7d32" font-weight="bold">port:5557 ★NEW ← robot pose (base_sim.py→RobotPoseSubscriber)</text>
+
+    <!-- Legend -->
+    <rect x="842" y="495" width="311" height="112" fill="none" stroke="#ccc" stroke-width="1" rx="3"/>
+    <text x="850" y="512" font-size="10" font-weight="bold" fill="#333">凡例</text>
+    <rect x="850" y="520" width="16" height="12" fill="#e8f5e9" stroke="#43a047" stroke-width="1" rx="1"/>
+    <text x="872" y="531" font-size="10" fill="#333">★ 本実装で新規追加したコンポーネント</text>
+    <rect x="850" y="540" width="16" height="12" fill="#dce6f1" stroke="#4472c4" stroke-width="1" rx="1"/>
+    <text x="872" y="551" font-size="10" fill="#333">運営提供コンポーネント（変更なし）</text>
+    <rect x="850" y="560" width="16" height="12" fill="#fff5f5" stroke="#cc3333" stroke-width="1" stroke-dasharray="4,2" rx="1"/>
+    <text x="872" y="571" font-size="10" fill="#333">運営側プラットフォーム（固定）</text>
+    <rect x="850" y="580" width="16" height="12" fill="#e8f5e9" stroke="#43a047" stroke-width="1" stroke-dasharray="4,2" rx="1"/>
+    <text x="872" y="591" font-size="10" fill="#333">★ 改変箇所（base_sim.py）</text>
+    <rect x="850" y="600" width="16" height="12" fill="#f0f4ff" stroke="#336699" stroke-width="1" rx="1"/>
+    <text x="872" y="611" font-size="10" fill="#333">参加者実装エリア（開発可能）</text>
+  </svg>
+  <footer>第8回対話システムライブコンペティション — mobile-robot-dialogue-system</footer>
+  <div class="page">41</div>
+</div>
+</body>
+</html>
