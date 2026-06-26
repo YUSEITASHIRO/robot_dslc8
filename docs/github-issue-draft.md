@@ -1,4 +1,4 @@
-# [進捗報告] Phase 1〜7 完了・Phase 6.2 保留
+# [進捗報告] Phase 1〜7 完了・バグ修正 PR 作成済み
 
 ## 概要
 
@@ -24,21 +24,30 @@
 | **6.1** | 会話フェーズ追跡（GREETING→TOURING→NEGOTIATING→CLOSING）+ `session.update` で動的 instructions 切替 | feat/phase6-strategy |
 | **7.1** | バックグラウンドシーン監視（25s 間隔で Vision スキャン・部長の動き検出） | feat/phase6-strategy |
 | **7.2** | 対話者位置追従ナビゲーション（Vision 結果から奥エリア移動を検出して先回り誘導） | feat/phase6-strategy |
+| **6.2** | `AudioBackend` 抽象化 + `WebRTCAudioBackend`（aiortc + aiohttp）、`--webrtc` フラグで切替 | feat/phase6.2-webrtc |
 
 ---
 
+## 🔧 バグ修正（`fix/webrtc-speaker-track` — PR レビュー中）
+
+| バグ | 症状 | 修正内容 |
+|------|------|---------|
+| `_SpeakerTrack` 動的継承 | `self.__class__` 差し替えで aiortc の `AudioStreamTrack.__init__` が正しく呼べない | モジュール先頭で条件付きインポート → 通常の静的継承に変更 |
+| `asyncio.get_event_loop()` × 5箇所 | Python 3.10+ で DeprecationWarning | `get_running_loop()` に統一 |
+| `KeyboardController` が `termios` をインポート | Windows で `ModuleNotFoundError` (Phase 4 修正済み・main 統合済み) | `sys.platform` チェックで非 Linux はスキップ |
+| `VISION_SUPPORTED_MODELS` に現行モデル未登録 | `gpt-4o-realtime-preview` で常に「未確認」警告 (Phase 4 修正済み・main 統合済み) | セットに追加 |
+
 ## 🔲 残課題・未実装
 
-### 中優先度（仕様待ち）
+### 中優先度
 
-- **Phase 6.2: WebRTC 音声バックエンド対応**
-  - 運営提供の仕様が確定後に対応
-  - `stream_mic()` / `play_audio()` をインターフェースで抽象化
+- **Phase 6.2 本実装: 運営 WebRTC 仕様への対応**
+  - 現在は aiortc + aiohttp による仮実装（`--webrtc` フラグで起動）
+  - `WebRTCAudioBackend` のみ差し替えれば OK な構造にしてあるため、仕様確定後に対応
 
 ### 低優先度
 
 - **リアルタイムモーション生成の統合**（Kimodo オンデマンド生成を対話中に使用）
-- **Windows 対応**（`termios` → クロスプラットフォーム制御）
 
 ---
 
@@ -66,8 +75,7 @@
 
 ## 次のアクション
 
-1. `feat/phase5-enhancement` の PR を作成して `main` にマージ
-2. `feat/phase6-strategy` の PR を作成して `main` にマージ
-3. 運営から WebRTC 仕様が届いたら Phase 6.2 に対応
+1. `fix/webrtc-speaker-track` の PR をレビュー・マージ
+2. 運営から WebRTC 仕様が届いたら Phase 6.2 本実装（`WebRTCAudioBackend` 差し替えのみ）
 
 /label: progress, phase7, planning
