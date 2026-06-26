@@ -34,6 +34,8 @@ OPENAI_REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-4o-realtime
 ZMQ_PORT    = 5556
 HEADER_SIZE = 1280
 SONIC_FPS   = 50
+
+SIM_POSE_ZMQ_URL = os.environ.get("SIM_POSE_ZMQ_URL", "tcp://localhost:5557")
 CHUNK_SIZE  = 5
 WALK_STEP_DURATION   = 0.35
 TURN_REPEAT_COUNT    = 5       # 運営推奨値（旋回の安定性向上）
@@ -977,6 +979,57 @@ class CameraFrameSubscriber:
                         "timestamp": time.time(),
                     }
                     self._missing_warned = False
+        finally:
+            sock.close(0)
+            ctx.term()
+
+
+# ── シミュレーター座標購読 ────────────────────────────────────
+
+class RobotPoseSubscriber:
+    """base_sim.py が ZMQ で配信するロボット真位置を受信し GridNavigator へ同期する。
+
+    シミュレーターが起動していない場合は接続タイムアウトを待つだけで無害に終了する。
+    ENV: SIM_POSE_ZMQ_URL (default tcp://localhost:5557)
+    """
+
+    def __init__(self, navigator: "GridNavigator", grid: dict, url: str = SIM_POSE_ZMQ_URL):
+        self._nav    = navigator
+        self._grid   = grid
+        self._url    = url
+        self._stop   = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="pose-sub")
+
+    def start(self):
+        self._thread.start()
+        print(f"[PoseSub] 購読開始: {self._url}")
+
+    def stop(self):
+        self._stop.set()
+
+    def _run(self):
+        ctx  = zmq.Context()
+        sock = ctx.socket(zmq.SUB)
+        sock.setsockopt(zmq.SUBSCRIBE, b"")
+        sock.setsockopt(zmq.CONFLATE, 1)
+        sock.setsockopt(zmq.RCVTIMEO, 300)
+        sock.setsockopt(zmq.LINGER, 0)
+        sock.connect(self._url)
+        import json as _json
+        try:
+            while not self._stop.is_set():
+                try:
+                    raw = sock.recv_string()
+                except zmq.Again:
+                    continue
+                try:
+                    d = _json.loads(raw)
+                    x, y = float(d["x"]), float(d["y"])
+                except Exception:
+                    continue
+                cell = _nearest_grid(self._grid, x, y)
+                if cell and cell != (self._nav._xi, self._nav._yi):
+                    self._nav._xi, self._nav._yi = cell
         finally:
             sock.close(0)
             ctx.term()
@@ -1984,6 +2037,10 @@ def main():
     walker.start_planner()
     navigator = GridNavigator(walker, grid, start_xi, start_yi)
 
+    # シミュレーター真位置の購読・同期（シミュが動いていなければ無害）
+    pose_sub = RobotPoseSubscriber(navigator, grid)
+    pose_sub.start()
+
     # カメラ購読（Phase 3.1 → CameraFrameSubscriber）
     camera = None
     camera_enabled = VISION_ENABLED or (not args.no_camera)
@@ -2029,6 +2086,7 @@ def main():
     finally:
         player.stop()
         kb.stop()
+        pose_sub.stop()
         if camera:
             camera.stop()
         sock.close()

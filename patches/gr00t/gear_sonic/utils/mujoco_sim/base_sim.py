@@ -928,7 +928,19 @@ class BaseSimulator:
         pass
 
     def init_publisher(self):
-        pass
+        try:
+            import zmq, json as _json
+            self._pose_zmq_ctx = zmq.Context()
+            self._pose_zmq_pub = self._pose_zmq_ctx.socket(zmq.PUB)
+            self._pose_zmq_pub.setsockopt(zmq.SNDHWM, 1)
+            port = int(os.environ.get("ROBOT_POSE_ZMQ_PORT", "5557"))
+            self._pose_zmq_pub.bind(f"tcp://*:{port}")
+            self._pose_zmq_ts  = 0.0
+            self._pose_zmq_dt  = float(os.environ.get("ROBOT_POSE_PUB_DT", "0.1"))
+            print(f"[PosePub] ZMQ tcp://*:{port}  dt={self._pose_zmq_dt}s")
+        except Exception as e:
+            self._pose_zmq_pub = None
+            print(f"[PosePub] ZMQ 初期化スキップ: {e}")
 
     def init_unitree_bridge(self):
         self.unitree_bridge = UnitreeSdk2Bridge(self.config)
@@ -961,6 +973,25 @@ class BaseSimulator:
                     self.redis_client.set("head_pos", pickle.dumps(head_pose[:3]))
                     self.redis_client.set("head_quat", pickle.dumps(head_pose[3:]))
                     ts = now
+
+                if (getattr(self, "_pose_zmq_pub", None) is not None
+                        and self.sim_env.use_floating_root_link
+                        and now - self._pose_zmq_ts >= self._pose_zmq_dt):
+                    import json as _json
+                    from scipy.spatial.transform import Rotation as _R
+                    q = self.sim_env.mj_data.qpos[3:7]  # [w,x,y,z]
+                    yaw = float(_R.from_quat([q[1], q[2], q[3], q[0]]).as_euler("xyz")[2])
+                    msg = _json.dumps({
+                        "x":   float(self.sim_env.mj_data.qpos[0]),
+                        "y":   float(self.sim_env.mj_data.qpos[1]),
+                        "z":   float(self.sim_env.mj_data.qpos[2]),
+                        "yaw": yaw,
+                    })
+                    try:
+                        self._pose_zmq_pub.send_string(msg, flags=1)  # NOBLOCK
+                    except Exception:
+                        pass
+                    self._pose_zmq_ts = now
 
                 if sim_cnt % int(self.viewer_dt / self.sim_dt) == 0:
                     self.sim_env.update_viewer()
